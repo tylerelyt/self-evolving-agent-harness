@@ -1,0 +1,6 @@
+# 第 01、02 讲随讲实验的模型侧依赖（Python 3.12）
+openai-codex==0.154.0
+litellm[proxy]==1.101.0
+
+# 运行 Notebook 还需要 Jupyter（默认未包含在模型依赖中）：
+#   python -m pip install jupyterlab ipykernel
