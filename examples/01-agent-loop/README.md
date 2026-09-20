@@ -14,22 +14,7 @@
 
 这是构造的教学材料，不连接生产系统。输入不变在本讲是任务要求和事后检查，并非目录级只读保证；第 09 讲再落实硬权限。
 
-Notebook 的生成文件不包含执行输出。当前已实现本例，验证情况见 [逐讲实现与稿件核对](../../docs/IMPLEMENTATION_REVIEW.md)。本地准备、单元测试和模型实跑分开记录。
-
-无需模型账号的检查：
-
-```bash
-python3 examples/01-agent-loop/build_notebook.py
-python3 -m unittest discover -s tests -p 'test_agent_loop.py' -v
-```
-
-安装 Notebook 中的依赖以后，还可以仅启动本地服务、创建 Thread，不执行 Turn：
-
-```bash
-python3 scripts/check_agent_loop_startup.py
-```
-
-这条命令使用无效测试密钥和本地不可用上游地址，不会调用 GLM。它不能证明模型已经完成事故调查。
+Notebook 文件不包含执行输出；所有教学素材（告警、日志、服务器信息）都在首次运行时于系统临时目录生成，不写入仓库。
 
 ## 接口依据
 

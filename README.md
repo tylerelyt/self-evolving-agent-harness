@@ -27,11 +27,10 @@ export BIGMODEL_API_KEY="你的智谱 API Key"
 
 ## 运行实验
 
-每个实验目录下都有 `build_notebook.py`（生成干净的 `workshop.ipynb`）、`workshop.ipynb` 和说明 `README.md`。
+每个实验目录下都有可从头运行的 `workshop.ipynb` 和说明 `README.md`。
 
 ```bash
 cd examples/01-agent-loop          # 或 examples/02-instruction-control
-python build_notebook.py
 jupyter lab workshop.ipynb
 ```
 

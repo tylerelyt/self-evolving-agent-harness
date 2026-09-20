@@ -5,7 +5,7 @@
 - 课程：极客时间《自进化 Agent 实战》第 02 讲
 - 场景：On-call Agent 夜间巡检服务器，巡检途中收到支付告警
 - 模型：智谱 **GLM-5.2**（经本地 LiteLLM 适配器接入 Codex App Server），不需要 OpenAI / ChatGPT 登录
-- 主文件：`workshop.ipynb`（由 `build_notebook.py` 生成）
+- 主文件：`workshop.ipynb`
 
 ## 你会观察到什么
 
@@ -33,11 +33,10 @@ Notebook 首次运行会在本机启动一个 LiteLLM 协议适配器（随机�
 ## 运行
 
 ```bash
-python build_notebook.py
 jupyter lab workshop.ipynb
 ```
 
-也可以直接打开已生成的 `workshop.ipynb`，从上到下依次执行。
+打开后从上到下依次执行即可。
 
 ## 说明与边界
 
