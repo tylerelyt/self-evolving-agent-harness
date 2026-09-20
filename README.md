@@ -1,6 +1,6 @@
 # 自进化 Agent 实战 · 随讲实验
 
-极客时间专栏《自进化 Agent 实战》的配套练习仓库。每个实验都是一个可从头运行的 Notebook，由 Codex App Server 负责组织任务与执行工具，模型统一使用智谱 **GLM-5.2**，通过本机运行的 LiteLLM 适配器接入，**不需要 OpenAI / ChatGPT 登录**。
+极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套练习仓库。每个实验都是一个可从头运行的 Notebook，由 Codex App Server 负责组织任务与执行工具，模型统一使用智谱 **GLM-5.2**，通过本机运行的 LiteLLM 适配器接入，**不需要 OpenAI / ChatGPT 登录**。
 
 ## 实验目录
 
