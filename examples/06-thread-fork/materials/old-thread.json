@@ -1,0 +1,8 @@
+[
+  {"turn": 1, "scope": "模块背景", "text": "历史支付模块独立部署，使用独立发布脚本，没有新平台灰度链路，部分实例不经过同一服务网格。日志入口 legacy_payment_logs，发布入口 legacy_release_history，监控入口 legacy_payment_db_pool，配置入口 legacy_payment_runtime_config。项目目录内用 Python 执行 query.py，后接入口名称；--list 可重新确认入口，--request-id 可关联请求。背景编号 {{BACKGROUND_MARKER}}。这些入口只作为跨事故线索，新任务仍要重新确认。"},
+  {"turn": 2, "scope": "旧事故观察", "text": "OLD-RELEASE：旧事故的第一条错误在应用发布前出现，因此当时没有将应用发布作为根因。此时间关系只属于旧事故。"},
+  {"turn": 3, "scope": "旧事故观察", "text": "OLD-WAIT：旧事故的数据库连接等待与错误率同时上升。此观察只属于旧事故。"},
+  {"turn": 4, "scope": "旧事故结论", "text": "OLD-POOL：上一场事故中连接池上限从 800 被调低到 200；这是旧事故的现场与结论，数值为构造值。"},
+  {"turn": 5, "scope": "旧事故处置", "text": "OLD-RECOVERY：上一场事故恢复连接池配置后，服务逐渐恢复。此处只记录构造的历史处置，不执行变更。"},
+  {"turn": 6, "scope": "旧事故收尾", "text": "OLD-CLOSED：旧事故报告确认连接池配置异常，事故已关闭；这不是今天调查的起点。"}
+]

@@ -1,0 +1,23 @@
+{
+  "source_lesson": 15,
+  "source_run": "run-20261012-163407-25989888",
+  "source_verdict_passed": true,
+  "approval": {
+    "job_id": "learn-4efd700ee62d",
+    "candidate_sha256": "af9a8fad3026dbec1fe878a833161b0c07719126e41a163093aee98ed337824a",
+    "reviewer": "teaching-auto",
+    "teaching_only": true,
+    "approved_at": "2026-10-12T08:36:34.506336+00:00",
+    "adopted": true
+  },
+  "name": "payment-investigation",
+  "directory": "payment/payment-investigation",
+  "files": {
+    "payment/payment-investigation/SKILL.md": "fa2f10b49a99d56906a703b63b36d5906a918e198535b39bf048310744e3cee6",
+    "payment/payment-investigation/references/payment-query-fields.md": "a638b3f41885a06b4df2a8deb867f3d17afc71cdf8b34b0cc504fd07636d233a",
+    "connection-pool-check/SKILL.md": "cbfd59e624465d39e0a54a65be73a40339c25e73534b06c4d9c243a8bd447a90",
+    "log-troubleshooting/SKILL.md": "62ea78e6687f05df8e41845106e7a36682680104c9e8e4c0dfcc16a9cea9fa58"
+  },
+  "package_sha256": "af9a8fad3026dbec1fe878a833161b0c07719126e41a163093aee98ed337824a",
+  "provenance_sha256": "121edf3555234313dff26f1d960576b170392ce15ea66c1df95297b803d45f7b"
+}

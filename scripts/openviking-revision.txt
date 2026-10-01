@@ -1,0 +1,5 @@
+0.4.12
+# 官方 PyPI: https://pypi.org/project/openviking/0.4.12/
+# 官方 tag: v0.4.12
+# tag commit: c1d38eb47ff2ebf9ff4cee46756728893fd8caf3
+# 原审源码 a1b662655819e46057a2e101ad7a7128d19ef1b7 无对应发布 wheel；不冒充同一提交。

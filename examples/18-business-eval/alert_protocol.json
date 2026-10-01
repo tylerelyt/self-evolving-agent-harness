@@ -1,0 +1,17 @@
+{
+  "protocol_version": "oncall-alert-pair-v2",
+  "model": "glm-5.2",
+  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+  "temperature": 0,
+  "preset_memory": "这是构造教学环境。故障判断依据当前集群、时间窗口和查询回执，不沿用过去的根因结论。",
+  "repeats": 2,
+  "versions": ["before", "after", "known-bad"],
+  "worker": "alert_worker.py",
+  "worker_timeout_seconds": 240,
+  "max_iterations": 16,
+  "max_tokens": 2048,
+  "max_parallel_workers": 1,
+  "scorer_version": "cluster-root-evidence-v2",
+  "learning_during_evaluation": false,
+  "constructed": true
+}
