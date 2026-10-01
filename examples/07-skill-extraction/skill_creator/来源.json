@@ -1,0 +1,12 @@
+{
+  "说明": "从本机 Codex 内置 skill-creator 原样复制，供教学离线调用；没有改写上游 Skill 或脚本。",
+  "来源目录": "Codex 内置 skills/.system/skill-creator",
+  "采集日期": "2026-10-10",
+  "sha256": {
+    "SKILL.md": "6656e54755638e8efcf275a472b9672eaa8a9a1b9e59dc210e275b03b59e1e66",
+    "scripts/init_skill.py": "bf0656a5f9d8d8cdecf0245eaf27e1df8e0e9b6d40ccdda814eb8e3d5f6992c8",
+    "scripts/generate_openai_yaml.py": "816df12072d74faf924d802a6599a139997e1441e90bfe4869ec304f2e5e2851",
+    "scripts/quick_validate.py": "ee6dba90f44d37171c5a6edb8095979c54919ff6822c1a907afca2e78c48738c",
+    "references/openai_yaml.md": "ffac39318e408108141d40f820968e59f70434a891694f9bf1d25be8237b150c"
+  }
+}

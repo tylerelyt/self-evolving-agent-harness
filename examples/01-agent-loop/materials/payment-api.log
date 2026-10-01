@@ -1,0 +1,8 @@
+# 脱敏日志练习材料；服务、时间、请求编号、金额、状态码、行号与随机编号均为构造值。
+2026-08-24T02:06:58Z INFO service=payment-api request_id=req-7f39 path=/checkout status=200
+2026-08-24T02:07:03Z INFO service=payment-api request_id=req-7f3a path=/checkout payload={"amount":29900}
+2026-08-24T02:07:03Z ERROR service=payment-api request_id=req-7f3a status=500 observation_id={{LOOP_MARKER}} error="KeyError: 'currency'"
+Traceback (most recent call last):
+  File "src/checkout.py", line 5, in create_order
+    "currency": payload["currency"],
+KeyError: 'currency'

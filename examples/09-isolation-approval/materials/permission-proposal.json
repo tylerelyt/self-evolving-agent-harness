@@ -1,0 +1,11 @@
+{
+  "cwd": "{{ADAPTER}}",
+  "approvalPolicy": "never",
+  "sandboxPolicy": {
+    "type": "workspaceWrite",
+    "writableRoots": ["{{TESTS}}"],
+    "networkAccess": false,
+    "excludeTmpdirEnvVar": true,
+    "excludeSlashTmp": true
+  }
+}

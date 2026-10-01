@@ -1,0 +1,14 @@
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  # 官方缺省为 10；为演示调小、让读者看到复盘效果。触发不保证修改成功。
+  nudge_interval: 1
+  flush_min_turns: 0
+  memory_char_limit: 2200
+  write_approval: false
+skills:
+  creation_nudge_interval: 0
+compression:
+  enabled: false
+terminal:
+  backend: local

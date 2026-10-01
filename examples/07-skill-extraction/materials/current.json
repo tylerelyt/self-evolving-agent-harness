@@ -1,0 +1,237 @@
+{
+  "legacy_payment_logs": [
+    {
+      "time": "2026-04-15T09:00:00+08:00",
+      "request_id": "pay-new-001",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:01+08:00",
+      "request_id": "pay-new-002",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:02+08:00",
+      "request_id": "pay-new-003",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:03+08:00",
+      "request_id": "pay-new-004",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:04+08:00",
+      "request_id": "pay-new-005",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:05+08:00",
+      "request_id": "pay-new-006",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:06+08:00",
+      "request_id": "pay-new-007",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:07+08:00",
+      "request_id": "pay-new-008",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:08+08:00",
+      "request_id": "pay-new-009",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:09+08:00",
+      "request_id": "pay-new-010",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:10+08:00",
+      "request_id": "pay-new-011",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:11+08:00",
+      "request_id": "pay-new-012",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:12+08:00",
+      "request_id": "pay-new-013",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:13+08:00",
+      "request_id": "pay-new-014",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:14+08:00",
+      "request_id": "pay-new-015",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:15+08:00",
+      "request_id": "pay-new-016",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:16+08:00",
+      "request_id": "pay-new-017",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:17+08:00",
+      "request_id": "pay-new-018",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:18+08:00",
+      "request_id": "pay-new-019",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    },
+    {
+      "time": "2026-04-15T09:00:19+08:00",
+      "request_id": "pay-new-020",
+      "interface": "/payment",
+      "instance": "legacy-payment-07",
+      "version": "legacy-2026.04.14",
+      "dependency": "settlement",
+      "domain": "settlement-old.example.invalid",
+      "error": "DNS resolution failed"
+    }
+  ],
+  "legacy_release_history": {
+    "window": "2026-04-14 09:00 至 2026-04-15 09:20 +08:00",
+    "releases": [],
+    "current_version": "legacy-2026.04.14",
+    "running_since": "2026-04-14 09:00 +08:00"
+  },
+  "legacy_payment_db_pool": {
+    "window": "2026-04-15 09:00 至 09:20 +08:00",
+    "active_connections": 18,
+    "waiting_connections": 0,
+    "pool_limit": 200,
+    "usage_percent": 9,
+    "definitions": {
+      "active_connections": "当前占用的连接数",
+      "waiting_connections": "等待获取连接的请求数",
+      "usage_percent": "活跃连接占连接池上限的百分比"
+    }
+  },
+  "legacy_payment_runtime_config": {
+    "read_at": "2026-04-15 09:20 +08:00",
+    "module": "legacy-payment",
+    "version": "legacy-2026.04.14",
+    "instance": "legacy-payment-07",
+    "settlement_url": "https://settlement-old.example.invalid",
+    "pool_limit": 200,
+    "dependency_change_record": {
+      "service": "settlement",
+      "time": "2026-04-15 08:50 +08:00",
+      "new_url": "https://settlement-new.example.invalid",
+      "old_domain_status": "已停用",
+      "status": "新地址已启用"
+    }
+  }
+}

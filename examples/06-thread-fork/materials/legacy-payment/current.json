@@ -1,0 +1,24 @@
+{
+  "说明": "以下实例、版本、时间、请求编号和数值均为构造值，不对应真实事故",
+  "legacy_release_history": {
+    "observation_id": "{{CURRENT_MARKER}}-release",
+    "deployment": "独立发布脚本，无新平台灰度链路",
+    "released_at": "09:10", "version": "2.8", "instances": ["legacy-payment-03"],
+    "unchanged_instances": [{"instance": "legacy-payment-02", "version": "2.7", "errors": 0}]
+  },
+  "legacy_payment_logs": {
+    "observation_id": "{{CURRENT_MARKER}}-logs", "first_error_at": "09:12",
+    "samples": [{"request_id": "pay-current-001", "instance": "legacy-payment-03", "version": "2.8", "error": "Missing Idempotency-Key; connection not returned on validation failure"},
+                {"request_id": "pay-current-002", "instance": "legacy-payment-03", "version": "2.8", "error": "DB connection wait timeout"}]
+  },
+  "legacy_payment_db_pool": {
+    "observation_id": "{{CURRENT_MARKER}}-metrics", "sampled_at": "09:18",
+    "instances": [{"instance": "legacy-payment-03", "version": "2.8", "active": 800, "waiting": 96, "limit": 800},
+                  {"instance": "legacy-payment-02", "version": "2.7", "active": 24, "waiting": 0, "limit": 800}]
+  },
+  "legacy_payment_runtime_config": {
+    "observation_id": "{{CURRENT_MARKER}}-config", "pool_limit": 800,
+    "recent_pool_changes": [], "retry_path_added_in": "2.8",
+    "code_file": "retry.py", "replay_file": "replay_retry.py"
+  }
+}
