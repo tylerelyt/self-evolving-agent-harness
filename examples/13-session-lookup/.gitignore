@@ -1,0 +1,6 @@
+.hermes-home/
+__pycache__/
+output/
+runtime/
+validation/runs/
+validation/*-latest.json

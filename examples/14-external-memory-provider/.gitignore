@@ -1,0 +1,6 @@
+/output/
+/.hermes-home/
+__pycache__/
+/runtime/
+/.runtime/
+/validation/runs/

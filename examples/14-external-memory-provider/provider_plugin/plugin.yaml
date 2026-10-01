@@ -1,0 +1,3 @@
+name: oncall-memory
+description: 按业务范围共享资料和带条件案例，保留同步状态与失败补传记录。
+kind: exclusive

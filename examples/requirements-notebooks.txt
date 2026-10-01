@@ -1,0 +1,9 @@
+# 模型侧依赖沿用前两讲；以下版本用于自动执行与验证 notebook。
+-r ../requirements.txt
+nbformat==5.11.1
+nbclient==0.11.0
+nbconvert==7.17.1
+ipykernel==7.3.0
+PyYAML==6.0.3
+# clash/socks 代理环境下 litellm 的 httpx 需要 socksio，否则适配器启动即失败。
+httpx[socks]>=0.27,<1

@@ -1,0 +1,5 @@
+{
+  "说明": "实例、版本、比例和指标均为构造值，不对应真实平台",
+  "platform_release_history": {"canary_instance": "pay-new-canary-01", "version": "4.2", "traffic_percent": 10},
+  "platform_mesh_metrics": {"sidecar_version": "1.9", "mesh_error_percent": 0.1}
+}

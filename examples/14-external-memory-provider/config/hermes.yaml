@@ -1,0 +1,15 @@
+memory:
+  provider: oncall-memory
+  memory_enabled: true
+  user_profile_enabled: false
+  # Hermes 默认间隔 10；为演示调低到 1。提供复盘机会，不保证写入。
+  nudge_interval: 1
+  flush_min_turns: 0
+  memory_char_limit: 2200
+  write_approval: false
+skills:
+  creation_nudge_interval: 0
+compression:
+  enabled: false
+terminal:
+  backend: local

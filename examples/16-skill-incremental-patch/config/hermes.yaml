@@ -1,0 +1,20 @@
+memory:
+  memory_enabled: true
+  user_profile_enabled: false
+  # 演示将用户轮次间隔从默认10调低到2；计数仍由 Hermes 完成。
+  nudge_interval: 2
+  flush_min_turns: 0
+  memory_char_limit: 2200
+  write_approval: false
+skills:
+  creation_nudge_interval: 0
+  write_approval: false
+  external_dirs: []
+compression:
+  enabled: false
+terminal:
+  backend: local
+tools:
+  # 本讲直接展示课程注册工具的参数和回执，不通过延迟发现入口包装。
+  tool_search:
+    enabled: "off"

@@ -1,0 +1,3 @@
+# 全部为构造值；字段口径见事故手册
+ts=2026-04-15T09:00:00+08:00 rid=pay-constructed-001 node=legacy-payment-07 ver=legacy-2026.04.14 peer=settlement host=settlement-old.example.invalid err=DNS_FAIL
+ts=2026-04-15T09:00:01+08:00 rid=pay-constructed-001 node=legacy-payment-07 ver=legacy-2026.04.14 peer=settlement host=settlement-old.example.invalid err=TIMEOUT

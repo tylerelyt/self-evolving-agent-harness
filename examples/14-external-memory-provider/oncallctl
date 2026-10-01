@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
+exec "${HERMES_PYTHON:-$HERE/../../.deps/hermes-agent/.venv/bin/python}" -B "$HERE/oncallctl.py" "$@"
