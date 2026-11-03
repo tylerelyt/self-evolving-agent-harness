@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1alpha1",
+  "environment": {"type": "none"},
+  "engine": {
+    "name": "course-hermes",
+    "custom": {
+      "transport": "local",
+      "conversation_mode": "batch",
+      "response_format": "session_result",
+      "timeout_seconds": 630,
+      "local": {"command": "python3", "args": [], "output_file": "engine/session-result.json"}
+    }
+  },
+  "cases": {"files": [], "parallelism": 1, "retry_policy": {"max_retries": 0}},
+  "benchmark": {"enabled": false},
+  "report": {"formats": ["json"]}
+}

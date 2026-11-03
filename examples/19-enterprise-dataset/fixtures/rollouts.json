@@ -1,0 +1,9 @@
+{
+  "origin": {"kind": "constructed", "description": "人工构造的公开教学记录，不是生产采集", "version": "teaching-v2"},
+  "traces": [
+    {"id": "demo-trace-001", "input": {"prompt": "调查 prod-eu 中 checkout-api 在 2026-10-20T10:00:00Z 至 2026-10-20T10:10:00Z 的超时告警，确定根因、影响范围和对应证据。请依据工具给出的快照覆盖范围，检查非目标集群中的同名服务。excluded_cluster 指这些同名服务所在、且经查询确认其故障不属于本次生产事故的非目标集群；不是任意无告警的集群，未覆盖或证据不足时不能声称已排除。"}, "output": "错误历史诊断：staging-eu/checkout-api 发布异常导致生产超时。", "metadata": {"incident_id": "incident-001", "cluster": "prod-eu", "snapshot_id": "incident-001", "scenario": "cross-cluster", "split": "dev", "skill_version": "online-v1"}},
+    {"id": "demo-trace-002", "input": {"prompt": "调查 prod-eu 中 checkout-api 在 2026-10-20T10:00:00Z 至 2026-10-20T10:10:00Z 的超时告警，确定根因、影响范围和对应证据。请依据工具给出的快照覆盖范围，检查非目标集群中的同名服务。excluded_cluster 指这些同名服务所在、且经查询确认其故障不属于本次生产事故的非目标集群；不是任意无告警的集群，未覆盖或证据不足时不能声称已排除。"}, "output": "同一事故的后续轮次。", "metadata": {"incident_id": "incident-001", "cluster": "prod-eu", "snapshot_id": "incident-001", "scenario": "cross-cluster", "split": "dev", "skill_version": "online-v1"}},
+    {"id": "demo-trace-003", "input": {"prompt": "调查 prod-eu 的历史超时。"}, "output": "只有最终结论。", "metadata": {"incident_id": "incident-002", "cluster": "prod-eu", "snapshot_id": "missing", "scenario": "missing-snapshot", "split": "holdout"}},
+    {"id": "demo-trace-004", "input": {"prompt": "复核 prod-eu 的一项尚未确认的调查。"}, "output": "未经值班人员核实的推测。", "metadata": {"incident_id": "incident-003", "cluster": "prod-eu", "snapshot_id": "incident-001", "scenario": "unreviewed", "split": "holdout"}}
+  ]
+}

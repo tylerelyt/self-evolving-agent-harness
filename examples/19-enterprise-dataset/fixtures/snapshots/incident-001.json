@@ -1,0 +1,21 @@
+{
+  "snapshot_id": "incident-001",
+  "incident_id": "incident-001",
+  "version": "snapshot-v2",
+  "coverage": {"start": "2026-10-20T10:00:00Z", "end": "2026-10-20T10:10:00Z", "complete": true},
+  "manifest": {
+    "clusters": {
+      "prod-eu": ["alerts", "metrics", "logs", "traces", "dependencies"],
+      "staging-eu": ["alerts", "logs"]
+    }
+  },
+  "rows": [
+    {"id": "alert-prod", "kind": "alerts", "cluster": "prod-eu", "service": "checkout-api", "time": "2026-10-20T10:04:00Z", "value": {"p99_ms": 3200, "threshold_ms": 1000}},
+    {"id": "metric-prod", "kind": "metrics", "cluster": "prod-eu", "service": "db-gateway", "time": "2026-10-20T10:02:00Z", "value": {"pool_used": 100, "pool_limit": 100, "queue_wait_ms": 2800}},
+    {"id": "log-prod", "kind": "logs", "cluster": "prod-eu", "service": "db-gateway", "time": "2026-10-20T10:03:00Z", "value": {"message": "connection pool exhausted; acquire timeout"}},
+    {"id": "trace-prod", "kind": "traces", "cluster": "prod-eu", "service": "checkout-api", "time": "2026-10-20T10:04:00Z", "value": {"upstream": "prod-eu/db-gateway", "total_ms": 3200, "upstream_wait_ms": 2900}},
+    {"id": "dep-prod", "kind": "dependencies", "cluster": "prod-eu", "service": "checkout-api", "time": "2026-10-20T10:00:00Z", "value": {"upstream": ["prod-eu/db-gateway"]}},
+    {"id": "alert-staging", "kind": "alerts", "cluster": "staging-eu", "service": "checkout-api", "time": "2026-10-20T10:04:00Z", "value": {"error_rate": 0.8}},
+    {"id": "log-staging", "kind": "logs", "cluster": "staging-eu", "service": "checkout-api", "time": "2026-10-20T10:03:00Z", "value": {"message": "new deployment missing configuration"}}
+  ]
+}

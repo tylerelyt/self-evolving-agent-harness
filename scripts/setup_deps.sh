@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 为第 11—12 讲获取 Hermes 源码，并准备共用的 Python 环境。
+# 为第 11—22 讲获取 Hermes 源码，并准备共用的 Python 环境。
 # 用法：bash scripts/setup_deps.sh
 #       PROXY=http://127.0.0.1:7890 bash scripts/setup_deps.sh
 #       PROXY= bash scripts/setup_deps.sh  # 直连

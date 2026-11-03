@@ -1,0 +1,12 @@
+{
+  "input": {
+    "prompt": "调查 prod-eu 中 checkout-api 在 2026-10-20T10:00:00Z 至 2026-10-20T10:10:00Z 的超时告警，确定根因、影响范围和对应证据。请依据工具给出的快照覆盖范围，检查非目标集群中的同名服务。excluded_cluster 指这些同名服务所在、且经查询确认其故障不属于本次生产事故的非目标集群；不是任意无告警的集群，未覆盖或证据不足时不能声称已排除。"
+  },
+  "metadata": {
+    "incident_id": "incident-001",
+    "cluster": "prod-eu",
+    "snapshot_id": "incident-001",
+    "scenario": "cross-cluster",
+    "split": "dev"
+  }
+}
