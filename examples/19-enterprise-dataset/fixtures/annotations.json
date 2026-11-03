@@ -1,0 +1,15 @@
+{
+  "incident-001@prod-eu": {
+    "status": "reviewed",
+    "reviewer": "教学样例标注者（非真实值班人员）",
+    "snapshot_id": "incident-001",
+    "snapshot_version": "snapshot-v2",
+    "basis": [
+      {"kind": "repair_record", "ref": "teaching-repair-001", "text": "构造的独立修复记录：10:07 扩大 prod-eu/db-gateway 连接池后排队与 checkout-api 超时同时恢复；未改 staging-eu。"},
+      {"kind": "incident_timeline", "ref": "teaching-timeline-001", "text": "构造的故障时间线：生产连接池耗尽先于接口告警；测试集群发布故障是独立事件。"}
+    ],
+    "expected_output": {"root_cause": "prod-eu/db-gateway", "affected_service": "prod-eu/checkout-api", "excluded_cluster": "staging-eu"},
+    "required_evidence": ["metric-prod", "log-prod", "trace-prod", "alert-prod"],
+    "required_exclusion_evidence": ["alert-staging", "log-staging"]
+  }
+}
