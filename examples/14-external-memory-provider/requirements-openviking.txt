@@ -1,5 +1,7 @@
 # 官方 PyPI 服务包，不安装 bot、local-embed、eval 或开发扩展。
 openviking==0.4.12
 openviking-sdk==0.1.1
+# OpenViking 0.4.12 将字符串资源 ID 直接传给 xxh64，4.x 不再接受 str。
+xxhash==3.6.0
 # 满足上游 >=5.0.3；避免新版元包拉入全部拆分的云产品 SDK。
 volcengine-python-sdk[ark]==5.0.3

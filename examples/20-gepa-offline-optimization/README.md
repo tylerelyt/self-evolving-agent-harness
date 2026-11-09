@@ -6,16 +6,21 @@
 
 ## 先运行无费用检查
 
-先按根 README 准备固定版本 Hermes。本讲另需 Python 3.10 或更新版本，以及 `requirements.txt` 中的 GEPA；已有环境可通过 `GEPA_PYTHON` 指定，不需要再装 Hermes 或 DSPy。
+先按仓库首页准备固定版本 Hermes。下面用课程的 Python 3.12 环境安装固定版 GEPA，`run.sh` 随后也用同一个解释器。已有装好 GEPA 的 Python 3.10 或更新环境时，可以事先设置 `GEPA_PYTHON` 为它的解释器绝对路径。
 
 ```bash
 cd examples/20-gepa-offline-optimization
-# 仅当现有 Python 环境没有 GEPA 时安装；不是模型调用。
-python3 -m pip install -r requirements.txt
+export GEPA_PYTHON="${GEPA_PYTHON:-$PWD/../../.deps/hermes-agent/.venv/bin/python}"
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --python "$GEPA_PYTHON" -r requirements.txt
+else
+  "$GEPA_PYTHON" -m pip --version >/dev/null 2>&1 || "$GEPA_PYTHON" -m ensurepip --upgrade
+  "$GEPA_PYTHON" -m pip install -r requirements.txt
+fi
 bash run.sh --offline
 ```
 
-默认 `bash run.sh` 也只运行离线测试。测试中的回答和反思文本是明确标注的构造数据，不是实际 Hermes 的成绩。macOS 上另有真实沙箱检查，不访问模型。也可打开 [workshop.ipynb](workshop.ipynb) 分步阅读和执行。
+在同一终端直接运行 `bash run.sh` 也是离线测试。测试中的回答和反思文本是构造数据。macOS 上另有真实沙箱检查，全程不访问模型。也可打开 [workshop.ipynb](workshop.ipynb)，选择装有 GEPA 的 Python 内核分步执行。
 
 ## 获准后才运行模型
 

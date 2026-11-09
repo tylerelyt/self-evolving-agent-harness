@@ -105,7 +105,12 @@ def prepare(source, annotations, snapshots):
 
 
 def build(source_path, annotations_path, snapshots_dir, output):
-    output = inside(output)
+    return write_pack(source_path, annotations_path, snapshots_dir, inside(output))
+
+
+def write_pack(source_path, annotations_path, snapshots_dir, output):
+    """Write the same verified pack into a caller-owned run directory."""
+    output = Path(output)
     if output.exists():
         raise FileExistsError('评测包目录已存在，请使用新目录，不能覆盖旧版本')
     snapshots = {p.stem: read(p) for p in Path(snapshots_dir).glob('*.json')}

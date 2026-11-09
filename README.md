@@ -1,6 +1,6 @@
 # 自进化 Agent 实战
 
-极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套代码，覆盖第 01—22 讲。
+极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套仓库，包含第 01—23 讲的学习入口和独立综合实践。
 
 Agent 能完成一次任务，还要能从工作中积累经验。这次纠正过的判断，应当影响下一次调查；已经摸清的排查方法，应当能够复用；业务发生变化以后，旧经验也应随之修订。否则，工程师仍要一遍遍补背景、纠正同类错误、整理和搬运经验。
 
@@ -20,14 +20,16 @@ Agent 能完成一次任务，还要能从工作中积累经验。这次纠正�
 | 判断新方法是否改善业务表现，又是否损害原有能力 | [18 业务评测](examples/18-business-eval/) |
 | 把真实经历整理成可重跑的题，再搜索更好的方法 | [19 企业数据集](examples/19-enterprise-dataset/) · [20 GEPA 离线优化](examples/20-gepa-offline-optimization/) |
 | 汇集多个实例的经历，让共同方法到达下一次任务 | [21 SkillClaw 收集与蒸馏](examples/21-skillclaw-session-collection/) · [22 验证发布与分发](examples/22-skillclaw-shared-revision/) |
+| 从持续巡检跑到候选评测、版本采用与恢复 | [23 双实例 On-call 大作业](workshop/capstone/README.md) |
+| 用固定订单成对比较两版方法，依据评分决定是否切换 | [综合实践 · 跑完一次学习循环](workshop/practice/README.md) |
 
-完整讲次见[课程与代码对照](COURSE_MAP.md)，第 10 讲负责背景与机制定位。
+完整讲次见[课程与代码对照](COURSE_MAP.md)。第 10 讲在正文中安排 Hermes 手动观察题，记录一次任务留下的 Memory、Skill 和新会话中的使用情况。
 
 前 9 讲采用 Codex SDK 与 Notebook，关键接口直接写在代码格里，适合拆开观察 Harness 的运行机制。第 11—18 讲采用 [Hermes](https://github.com/NousResearch/hermes-agent)，从后台复盘和长期记忆继续推进到会话检索、外部记忆、Skill 管理和业务评测。第 19—22 讲接上企业数据集、官方 GEPA 优化器，以及 SkillClaw 的会话采集、演化和分发。各讲说明分别标明框架原生机制与课程增加的场景、检查和评测代码。
 
 ## 开始运行
 
-需要 Git、Bash、Python 3.12 和智谱 `GLM_API_KEY`。练习使用构造的业务材料，模型调用和工具执行走真实接口，会产生 API 费用。
+准备 Git、Bash 和 Python 3.12。练习使用构造的业务材料。运行真实模型的练习时，按各讲说明配置智谱 `GLM_API_KEY`，模型调用会产生 API 费用。各讲的离线检查和第 23 讲默认双实例演练无需模型密钥。
 
 ### 从第 1 讲开始
 
@@ -37,11 +39,16 @@ Agent 能完成一次任务，还要能从工作中积累经验。这次纠正�
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r examples/requirements-notebooks.txt jupyterlab
-export GLM_API_KEY="你的智谱 API Key"
+printf '智谱 API Key: '
+read -r -s GLM_API_KEY
+printf '\n'
+export GLM_API_KEY
 python -m jupyterlab examples/01-agent-loop/workshop.ipynb
 ```
 
 选择同一 Python 3.12 内核，从上到下运行。Notebook 通过 SDK 启动 Codex app-server，再经本地适配器调用 GLM。接口与实验入口见[第 01—09 讲练习导览](examples/README.md)；第 03、08、09 讲需要宿主支持 Codex 原生 Sandbox。
+
+想先检查 Notebook 和材料是否可用，可以在安装依赖后运行 `.venv/bin/python examples/01-agent-loop/run_validation.py --mode offline`。这一步无需密钥，验证构造材料、Notebook 单元格和离线产物。
 
 ### 体验持续工作的值班助手
 
@@ -64,11 +71,16 @@ bash examples/12-memory-revision/run.sh
 
 ### 继续第 19—22 讲
 
-第 19 讲把调查记录、环境快照和独立确认的答案分开，再运行同一批评测题；Langfuse 可以使用[随讲提供的 Docker Compose 自部署](examples/19-enterprise-dataset/selfhost/README.md)，也可以连接云端项目。第 20 讲通过明确的三组题号清单接续第19讲的评测包，沿用原快照和评分规则，由官方 GEPA 调用 Hermes 比较候选。也保留可独立运行的九题教学示例；两条路径不混合成绩，每次都核对实际加载、评分和导出的 Skill。
+第 18—20 讲的隔离评测需要 macOS `sandbox-exec`。可以先运行各讲的数据和评分器自检。第 19 讲的 Skill Up 校验与 Hermes 接线预检也需要 macOS。[第 18 讲](examples/18-business-eval/README.md) · [第 19 讲](examples/19-enterprise-dataset/README.md#单独检查数据处理) · [第 20 讲](examples/20-gepa-offline-optimization/README.md#先运行无费用检查)
 
-第 21、22 讲共用 SkillClaw 依赖：
+第 19 讲把调查记录、环境快照和独立确认的答案分开，再运行同一批评测题。跟随正文使用 Langfuse 时，可以连接云端项目，也可以用随讲提供的 Docker Compose 自部署。[Langfuse 自部署](examples/19-enterprise-dataset/selfhost/README.md)
+
+第一次做第 20 讲，先用随讲提供的九题教学数据，按其 README 的默认路径运行。第 19 讲默认只导出一道可运行的题，适合检查一次重跑。接续自己的第 19 讲评测包时，要先准备来自不同事故的训练、验证和留出题，再把划分清单交给 GEPA，沿用原快照和评分规则。[第 20 讲九题运行命令](examples/20-gepa-offline-optimization/README.md#模型连接与搜索预算) · [第 19 讲题包接续条件](examples/20-gepa-offline-optimization/README.md#接续第19讲的数据集)
+
+第 21、22 讲共用 Hermes 和 SkillClaw 依赖。在仓库根目录按以下顺序准备环境并开始第 21 讲。
 
 ```bash
+bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
 export GLM_API_KEY="你的智谱 API Key"
 bash examples/21-skillclaw-session-collection/run.sh \
@@ -76,6 +88,12 @@ bash examples/21-skillclaw-session-collection/run.sh \
 ```
 
 默认直接发布；希望先做原生客户端验证时，在第21讲启动命令中加 `--publish-mode validated`。两种结果都可以按第22讲继续，不必重跑采集。第22讲观察原生周期同步和新Session的实际使用，并把客户端文本验证与业务工具检查分开记录，不能用文件同步成功代替能力检查。全部操作使用练习自己的共享组和目录，不改个人Hermes或SkillClaw配置。
+
+### 运行第 23 讲大作业与综合实践
+
+第 23 讲的双实例演练从持续巡检和检查点起步，注入模拟故障，再把真实 Hermes 工具回执和原生 SkillClaw 归档送进候选评测、发布与采用验证。默认使用脚本模型。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲大作业](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
+
+综合实践使用独立的支付状态查询案例，观察经历回流、评分器自检、同题比较和保留基线的决定。[综合实践](workshop/practice/README.md)
 
 ## 许可证
 

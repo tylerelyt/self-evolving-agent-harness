@@ -16,8 +16,11 @@ def main():
     if importlib.metadata.version('openviking') != expected:
         raise RuntimeError('OpenViking 安装版本不符')
     with patch.object(socket.socket, 'connect', side_effect=RuntimeError('检查禁止联网')):
+        # 与服务入口一样先加载服务层，避免 0.4.12 从 session 侧进入循环导入。
+        from openviking.service import OpenVikingService
         from openviking.lib import ragfs_python
         from openviking.storage.vectordb.engine import _native
+        from openviking.storage.vectordb.utils.str_to_uint64 import str_to_uint64
         from openviking_cli.utils.config.open_viking_config import OpenVikingConfig
         from openviking.server.config import ServerConfig
         from openviking.session.memory_policy import MemoryPolicy
@@ -26,6 +29,11 @@ def main():
         parsed = OpenVikingConfig.from_dict(config)
         server = ServerConfig(**config['server'])
         policy = MemoryPolicy.from_dict(MEMORY_POLICY)
+        assert callable(OpenVikingService.initialize)
+        try:
+            str_to_uint64('lesson14-resource')
+        except TypeError as exc:
+            raise RuntimeError('OpenViking 无法为字符串资源 ID 建索引，请按本讲依赖重新安装') from exc
         assert server.agent_evolution.enabled and 'experiences' in policy.memory_types
         assert parsed.vlm.model == 'glm-5.2'
         print(json.dumps({'version': expected, 'native_extensions': 'imported',

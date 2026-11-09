@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 为第 11—22 讲获取 Hermes 源码，并准备共用的 Python 环境。
+# 为第 11—23 讲获取 Hermes 源码，并准备共用的 Python 环境。
 # 用法：bash scripts/setup_deps.sh
 #       PROXY=http://127.0.0.1:7890 bash scripts/setup_deps.sh
 #       PROXY= bash scripts/setup_deps.sh  # 直连
@@ -101,7 +101,7 @@ if [[ ! -x "$PYTHON" ]] || ! "$PYTHON" -c \
 fi
 
 if $CHECK_ONLY; then
-  "$PYTHON" -c 'import run_agent, dotenv, sys; print(f"固定 Hermes 提交、Python {sys.version_info.major}.{sys.version_info.minor} 与核心依赖检查通过。")'
+  "$PYTHON" -IB -c 'import run_agent, dotenv, sys; print(f"固定 Hermes 提交、Python {sys.version_info.major}.{sys.version_info.minor} 与核心依赖检查通过。")'
   exit 0
 fi
 

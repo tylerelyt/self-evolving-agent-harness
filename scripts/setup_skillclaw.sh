@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 第21、22讲使用固定 SkillClaw 源码；不改个人 Hermes / SkillClaw 配置。
+# 第21—23讲使用固定 SkillClaw 源码；不改个人 Hermes / SkillClaw 配置。
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$HERE/.." && pwd)"
@@ -40,7 +40,10 @@ if ! $CHECK; then
   if command -v uv >/dev/null 2>&1; then
     uv pip install --python "$PYTHON" -e "$SOURCE[evolve]"
   else
+    if ! "$PYTHON" -m pip --version >/dev/null 2>&1; then
+      "$PYTHON" -m ensurepip --upgrade
+    fi
     "$PYTHON" -m pip --proxy "$PROXY" install -e "$SOURCE[evolve]"
   fi
 fi
-"$PYTHON" -B -c 'from skillclaw.api_server import SkillClawAPIServer; from skillclaw.validation_worker import ValidationWorker; from evolve_server.engines.workflow import EvolveServer; print("SkillClaw 固定源码与代理、复盘、验证依赖检查通过。")'
+"$PYTHON" -IB -c 'from skillclaw.api_server import SkillClawAPIServer; from skillclaw.validation_worker import ValidationWorker; from evolve_server.engines.workflow import EvolveServer; print("SkillClaw 固定源码与代理、复盘、验证依赖检查通过。")'

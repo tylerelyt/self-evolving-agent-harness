@@ -1,0 +1,45 @@
+{
+  "orders": {
+    "P-01": {"amount_due": 900, "successful_payments": [450, 450], "final_status": "已到账"},
+    "P-02": {"amount_due": 600, "successful_payments": [], "final_status": "处理中", "channel_accepted": true},
+    "P-03": {"amount_due": 700, "successful_payments": [], "final_status": "处理中"},
+    "P-04": {"amount_due": 800, "successful_payments": [200], "final_status": "部分到账"},
+    "P-05": {"amount_due": 500, "successful_payments": [500], "final_status": "已到账"},
+    "P-06": {"amount_due": 400, "successful_payments": [], "final_status": "处理中", "channel_accepted": true},
+    "P-07": {"amount_due": 300, "successful_payments": [], "final_status": "处理中", "channel_accepted": true}
+  },
+  "answers": {
+    "split": "成功金额：450 + 450 = 900 元。最终状态：已到账。内部队列：未知。",
+    "plain": "成功金额：900 元。最终状态：已到账。内部队列：未知。",
+    "accepted": "渠道已受理，尚未最终到账。成功金额：0 元。最终状态：处理中。内部队列：未知。",
+    "accepted_with_queue": "渠道已受理，尚未最终到账。成功金额：0 元。最终状态：处理中。内部队列：payops-confirm-17。",
+    "accepted_as_paid": "渠道已受理。成功金额：0 元。最终状态：已到账。内部队列：payops-confirm-17。",
+    "pending": "成功金额：0 元。最终状态：处理中。内部队列：未知。",
+    "pending_with_queue": "成功金额：0 元。最终状态：处理中。内部队列：payops-confirm-17。",
+    "wrong_partial": "成功金额：800 元。最终状态：部分到账。内部队列：未知。",
+    "single": "成功金额：500 元。最终状态：已到账。内部队列：未知。"
+  },
+  "calibration": [
+    {"id": "equivalent-sum", "answer": "split", "expected": [900, "已到账", "未知"], "pass": true},
+    {"id": "equivalent-total", "answer": "plain", "expected": [900, "已到账", "未知"], "pass": true},
+    {"id": "accepted-is-pending", "answer": "accepted_with_queue", "expected": [0, "处理中", "payops-confirm-17"], "pass": true},
+    {"id": "accepted-is-not-settled", "answer": "accepted_as_paid", "expected": [0, "处理中", "payops-confirm-17"], "pass": false},
+    {"id": "queue-requires-acceptance", "answer": "pending_with_queue", "expected": [0, "处理中", "未知"], "pass": false}
+  ],
+  "experience": {"id": "unhandled-accepted", "order": "P-06", "question": "请查付款最终进度及需要交给哪个内部队列。", "baseline": "accepted"},
+  "pairs": {
+    "critical": [
+      {"id": "single-payment", "order": "P-05", "question": "这笔钱已经到账了吗？", "baseline": "single", "candidate": "single", "expected": [500, "已到账", "未知"]}
+    ],
+    "main": [
+      {"id": "split-payment", "order": "P-01", "question": "查订单是否付足，以及实际到账多少。", "baseline": "split", "candidate": "split", "expected": [900, "已到账", "未知"]},
+      {"id": "accepted-pending", "order": "P-02", "question": "渠道受理后付款到账了吗？接下来交给谁？", "baseline": "accepted", "candidate": "accepted_with_queue", "expected": [0, "处理中", "payops-confirm-17"]},
+      {"id": "missing-acceptance", "order": "P-03", "question": "这笔处理中付款能交给确认队列吗？", "baseline": "pending", "candidate": "pending_with_queue", "expected": [0, "处理中", "未知"]},
+      {"id": "partial-payment", "order": "P-04", "question": "还有多少钱没到账？请先报实际到账金额。", "baseline": "wrong_partial", "candidate": "wrong_partial", "expected": [200, "部分到账", "未知"]}
+    ],
+    "rephrased": [
+      {"id": "missing-acceptance-rephrased", "order": "P-03", "question": "只看到处理中的状态，现在应交给哪个组？", "baseline": "pending", "candidate": "pending_with_queue", "expected": [0, "处理中", "未知"]}
+    ]
+  },
+  "sharing": {"id": "accepted-new-instance", "order": "P-07", "question": "查是否最终到账，若仍在处理，请告知内部确认队列。", "baseline": "accepted", "candidate": "accepted_with_queue"}
+}

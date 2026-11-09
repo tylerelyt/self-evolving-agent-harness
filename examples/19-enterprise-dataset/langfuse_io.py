@@ -134,7 +134,11 @@ def export(lf, name, version):
 
 
 def restore(exported, snapshots, output):
-    """只有带齐本讲标注与快照版本的条目才可恢复；其他条目留下待处理原因。"""
+    return write_restored_pack(exported, snapshots, inside(output))
+
+
+def write_restored_pack(exported, snapshots, output):
+    """仅恢复标注和快照版本完整的条目；其他条目留下待处理原因。"""
     timestamp(exported['requested_version'])
     ready, pending = [], []
     for item in exported['items']:
@@ -174,7 +178,7 @@ def restore(exported, snapshots, output):
                          'scorer_version': SCORER_VERSION, 'schema_sha256': file_digest(HERE / 'schema.py'),
                          'scorer_sha256': file_digest(HERE / 'grader.py'), 'monitor_sha256': file_digest(HERE / 'monitor.py')}}
     pack['pack_sha256'] = digest(pack)
-    output = inside(output)
+    output = Path(output)
     if output.exists():
         raise FileExistsError('恢复目录已存在，不能覆盖旧版本')
     save(output / 'pack.json', pack)

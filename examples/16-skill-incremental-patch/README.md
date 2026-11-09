@@ -78,11 +78,11 @@ bash examples/16-skill-incremental-patch/run.sh --live --no-auto-approve
 ```bash
 PYTHONDONTWRITEBYTECODE=1 .deps/hermes-agent/.venv/bin/python -B \
   examples/16-skill-incremental-patch/selfcheck.py
-python -B examples/16-skill-incremental-patch/run_validation.py \
+.venv/bin/python -B examples/16-skill-incremental-patch/run_validation.py \
   --mode offline --run-id my-offline-check
 ```
 
-自检使用构造调用，覆盖缺失写入、未完成复盘、来源与基线变化、复制失败回滚、人工确认、读取顺序和本次进程清理。不依赖被 Git 忽略的历史文件。Notebook 验证需要先安装仓库的 `examples/requirements-notebooks.txt`，不由执行器自动安装。
+自检使用构造调用，覆盖缺失写入、未完成复盘、来源与基线变化、复制失败回滚、人工确认、读取顺序和本次进程清理。Notebook 验证使用首页准备的 `.venv`，需要其中已安装 `examples/requirements-notebooks.txt`。
 
 业务数据是 [scenario.py](scenario.py) 中的构造现场，不连接生产监控。运行记录可能包含完整输入输出，均不提交 Git；分享前检查凭据和个人信息。旧历史回放不用于本次验收。
 

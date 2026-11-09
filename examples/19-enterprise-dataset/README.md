@@ -8,7 +8,7 @@
 
 ## 先跑通文章中的完整过程
 
-已有根 README 要求的 Hermes 环境后，在本目录执行：
+完整流程需要 macOS `sandbox-exec`、固定版本 Hermes 和 Langfuse 项目。其他平台可先运行下方的数据自检。在本目录执行：
 
 ```bash
 PY=../../.deps/hermes-agent/.venv/bin/python
@@ -38,19 +38,28 @@ LF=.deps/sdk/bin/python
 
 ## 单独检查数据处理
 
-先完成根 README 的 Hermes 准备。本讲固定 Hermes 提交 `aaf9688519cca58dd5f76a589a0911aff269b060`，复用仓库 `.deps/hermes-agent`，不改共用依赖。执行器同时检查提交号及已跟踪文件的状态；存在已暂存或未暂存的改动时拒绝运行，不会自动恢复文件。以下命令在本目录执行：
+数据处理和评分器自检只用 Python 标准库。在仓库根目录开始：
 
 ```bash
 cd examples/19-enterprise-dataset
+python3.12 -B selftest.py
+python3.12 -B dataset.py --out runtime/pack-v3
+```
+
+`selftest.py` 也可用 Python 3.11 以上运行。评测包默认得到 **1 个 ready、2 个 pending**。同一事故的两段 Trace 合成一道题。重复制题时请使用新目录。
+
+## 在 macOS 验证 Hermes 接线和 Skill Up
+
+按仓库首页准备固定版本 Hermes 后，在本讲目录继续。执行器检查提交号和已跟踪文件状态，有源码改动时会停止。以下两项检查无需模型密钥。
+
+```bash
 PY=../../.deps/hermes-agent/.venv/bin/python
-"$PY" -B selftest.py
-"$PY" -B dataset.py --out runtime/pack-v3
 "$PY" -B run.py --pack runtime/pack-v3/pack.json --probe
 "$PY" -B setup.py
 "$PY" -B run.py --pack runtime/pack-v3/pack.json
 ```
 
-`selftest.py` 不需要第三方依赖，也可用 Python 3.11 以上运行。评测包默认得到 **1 个 ready、2 个 pending**；同一事故的两段 Trace 合成一道题。重复执行生成命令时请换一个输出目录，不覆盖已有版本。`--probe` 实际导入 Hermes、加载技能、查询一次快照并探测答案隔离，但不创建模型请求。
+`--probe` 在 macOS `sandbox-exec` 中实际导入 Hermes、加载技能、查询一次快照并探测答案隔离。
 
 `setup.py` 只下载并校验本讲固定的 Skill Up 0.14.0 官方 macOS 二进制，约 21 MB 下载、51 MB 解压，不编译 Go、不安装整个依赖仓库。最后一条命令只调用原生 `skill-up validate`。上游找不到根 `SKILL.md` 的提示不影响自定义 Engine；技能由本讲适配器通过 Hermes 原生预载接口加载。
 
@@ -90,7 +99,7 @@ PY=../../.deps/hermes-agent/.venv/bin/python
 可直接改变查询参数，检查快照而不调用模型：
 
 ```bash
-"$PY" -B monitor.py fixtures/snapshots/incident-001.json logs \
+python3.12 -B monitor.py fixtures/snapshots/incident-001.json logs \
   --cluster prod-eu --service db-gateway \
   --start 2026-10-20T10:00:00Z --end 2026-10-20T10:10:00Z
 ```
