@@ -21,7 +21,7 @@ bash scripts/setup_skillclaw.sh
   --out workshop/capstone/runtime/fleet-demo
 ```
 
-输出目录须为新目录。演练启动两个独立 HTTP 环境。两个 Hermes 进程并行巡检，分别调查支付持续失败与订单间歇失败。每个实例有自己的 SessionDB 和 SkillClaw Client Proxy。
+输出目录须为新目录。演练启动两个独立 HTTP 环境。两个 Hermes 进程并行巡检，分别调查支付持续失败与订单间歇失败。每个实例有自己的 SessionDB 和 SkillClaw Client Proxy。巡检只访问实验的本机回环地址。中断时会清理本次注入的故障，保留失败报告供检查。
 
 初判报告落盘后，Hermes 从该事故的报告 Item 创建长调查分支，重新读取同一版 Skill，再为目标服务依次发出三次新探测。报告按回执区分持续失败、间歇失败或本次未复现，根因记为未知。分支保留父 Session 和原报告 Item，供审批回查。每轮进入 SkillClaw 的仍是两个原始初判会话。
 
@@ -206,7 +206,9 @@ fi
 
 可用 `--fanout workshop/capstone/runtime/fanout` 把独立的共享上游练习加入同一份验收报告。它有自己的故障、审批、恢复和回放记录。
 
-`passed` 表示对应的证据通过核对，`pending` 表示仍缺少所需证据，`not_requested` 表示这次演练未启用该模块。缺少实跑回退或真实模型业务效果会单独列出。退出码为 0 表示所提供的证据通过核对。证据损坏、错配或演练未完成时，命令返回失败。
+`passed` 表示对应的证据通过核对，`pending` 表示仍缺少所需证据，`not_requested` 表示这次演练未启用该模块。默认退出码为 0 表示所提供的证据通过核对，报告仍可能列出待验证项。证据损坏、错配或演练未完成时，退出码为 1。
+
+自动化验收时，可重复传入 `--require` 指定必须通过的检查。例如回退演练使用 `--require core.rollback`。指定的检查缺失、待验证或未启用时，JSON 仍会输出，命令以退出码 2 结束。
 
 ## 回放一次已完成的事故初判
 

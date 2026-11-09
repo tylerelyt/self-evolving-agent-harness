@@ -26,7 +26,12 @@ if [[ ! -e "$SOURCE" ]]; then
   trap 'rm -rf -- "$TEMP"' EXIT
   git init -q "$TEMP"
   git -C "$TEMP" remote add origin https://github.com/AMAP-ML/SkillClaw.git
-  git -C "$TEMP" -c http.proxy="$PROXY" fetch --depth 1 origin "$REVISION"
+  if ! GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-100}" \
+    GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-20}" \
+    git -C "$TEMP" -c http.proxy="$PROXY" fetch --depth 1 origin "$REVISION"; then
+    echo '错误：无法获取固定 SkillClaw 提交。请检查 GitHub 连通性，或用 PROXY 指定代理后重试。' >&2
+    exit 1
+  fi
   git -C "$TEMP" checkout --detach "$REVISION"
   mv "$TEMP" "$SOURCE"
   trap - EXIT

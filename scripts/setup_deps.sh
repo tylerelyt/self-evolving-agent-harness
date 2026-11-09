@@ -52,7 +52,12 @@ if [[ ! -e "$HERMES_SRC" ]]; then
   trap 'rm -rf -- "$HERMES_TEMP"' EXIT
   git init -q "$HERMES_TEMP"
   git -C "$HERMES_TEMP" remote add origin https://github.com/NousResearch/hermes-agent.git
-  git -C "$HERMES_TEMP" -c http.proxy="$PROXY" fetch --depth 1 origin "$HERMES_COMMIT"
+  if ! GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-100}" \
+    GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-20}" \
+    git -C "$HERMES_TEMP" -c http.proxy="$PROXY" fetch --depth 1 origin "$HERMES_COMMIT"; then
+    echo '错误：无法获取固定 Hermes 提交。请检查 GitHub 连通性，或用 PROXY 指定代理后重试。' >&2
+    exit 1
+  fi
   git -C "$HERMES_TEMP" checkout --detach "$HERMES_COMMIT"
   mv "$HERMES_TEMP" "$HERMES_SRC"
   trap - EXIT

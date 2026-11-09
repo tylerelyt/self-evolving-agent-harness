@@ -15,7 +15,7 @@ import threading
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 import uuid
 
 
@@ -50,10 +50,33 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def service_address(state, service):
+    address = urlsplit(load_json(state / "environment.json")[service])
+    if (address.scheme != "http" or address.hostname != "127.0.0.1" or address.port in (None, 0)
+            or address.username is not None or address.path or address.query or address.fragment):
+        raise RuntimeError("Service address must be the assigned loopback HTTP endpoint")
+    return address
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def open_service(state, service, path, *, headers=None):
+    address = service_address(state, service)
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+    try:
+        return opener.open(Request(address.geturl() + path, headers=headers or {}), timeout=3)
+    except HTTPError as exc:
+        if not 300 <= exc.code < 400:
+            raise
+        exc.close()
+        raise RuntimeError("Lab service unexpectedly returned a redirect") from exc
+
+
 def get_snapshot(state, service):
-    address = load_json(state / "environment.json")[service]
-    opener = build_opener(ProxyHandler({}))
-    with opener.open(f"{address}/metrics", timeout=3) as response:
+    with open_service(state, service, "/metrics") as response:
         result = json.load(response)
     if result["service"] != service:
         raise RuntimeError("Metrics response belongs to another service")
@@ -62,9 +85,7 @@ def get_snapshot(state, service):
 
 def get_telemetry(state, service):
     """Read one service's rolling spans and failure logs from the lab."""
-    address = load_json(state / "environment.json")[service]
-    opener = build_opener(ProxyHandler({}))
-    with opener.open(f"{address}/telemetry", timeout=3) as response:
+    with open_service(state, service, "/telemetry") as response:
         result = json.load(response)
     if result["service"] != service or result["source"] != TELEMETRY_SOURCE:
         raise RuntimeError("Telemetry response belongs to another service")
@@ -72,11 +93,8 @@ def get_telemetry(state, service):
 
 
 def probe_service(state, service, *, environment_id=None):
-    address = load_json(state / "environment.json")[service]
-    opener = build_opener(ProxyHandler({}))
     try:
-        request = Request(f"{address}/work", headers={"X-Lab-Probe": "1"})
-        with opener.open(request, timeout=3) as response:
+        with open_service(state, service, "/work", headers={"X-Lab-Probe": "1"}) as response:
             status = response.status
             trace_id = response.headers.get("X-Lab-Trace-Id")
             observed_scope = json.load(response) if environment_id else None
@@ -104,10 +122,7 @@ def probe_diagnostic(state, service, path, environment_id):
     """Read one scoped diagnostic route without following redirects or replacements."""
     if service not in SERVICES or path not in (DIAGNOSTIC_V1, DIAGNOSTIC_V2):
         raise ValueError("Unknown diagnostic service or path")
-    address = urlsplit(load_json(state / "environment.json")[service])
-    if (address.scheme != "http" or address.hostname != "127.0.0.1" or address.port is None
-            or address.username is not None or address.path or address.query or address.fragment):
-        raise RuntimeError("Diagnostic address must be the assigned loopback HTTP endpoint")
+    address = service_address(state, service)
 
     with closing(HTTPConnection(address.hostname, address.port, timeout=3)) as connection:
         connection.request("GET", path)

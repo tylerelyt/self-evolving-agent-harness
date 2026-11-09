@@ -2,11 +2,21 @@
 
 极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套仓库，包含第 01—23 讲的学习入口和独立综合实践。
 
-Agent 能完成一次任务，还要能从工作中积累经验。这次纠正过的判断，应当影响下一次调查；已经摸清的排查方法，应当能够复用；业务发生变化以后，旧经验也应随之修订。否则，工程师仍要一遍遍补背景、纠正同类错误、整理和搬运经验。
+用巡检与故障调查练习 Agent Harness。先看清 Agent 怎样行动、依据什么作判断，再让调查经历形成 Memory 或 Skill。新的方法要经业务评测，才能进入下一次任务。每项练习都能回查模型请求、工具结果或版本决策。
 
-这门专栏从 Harness 入手，把这些反复发生的工作逐步交给系统。前半程先让你能驾驭正在运行的 Agent：看清它依据什么作判断，怎样干预任务，怎样组织上下文、规则和权限。后半程让经验整理成为持续工作的一部分：由后台复盘提取经验，保存为 Memory 或 Skill，再在后续任务中使用和修订。人的目标、授权与业务反馈，成为系统持续改进的依据。
+## 先跑一个练习
 
-这里用巡检与故障调查贯穿实战。你可以直接运行代码，查看模型请求、工具结果、规则文件和记忆变化，把每一项工程判断落实到系统的实际行为上。
+| 学习目标 | 入口 | 前置条件 |
+| --- | --- | --- |
+| 看一次评分器校准和版本采用决定 | [支付状态综合实践](workshop/practice/README.md) | Python 3.12，无需密钥 |
+| 按课学习 Agent 的执行过程 | [第 1 讲 Notebook](#从第-1-讲开始) | Python 3.12、Notebook 依赖。运行真实模型时需要 GLM 密钥 |
+| 实际运行两个巡检 Agent，看 Skill 如何发布与回退 | [第 23 讲大作业](workshop/capstone/README.md#运行双实例演练) | 固定版本的 Hermes 和 SkillClaw，默认模式无需密钥 |
+
+在仓库根目录运行下面的命令，可先用构造订单对照两版方法的评分。终端会打印保留或采用的决定，以及本轮记录的目录。
+
+```bash
+python3.12 workshop/practice/replay.py --judge calibrated
+```
 
 ## 从哪里读起
 
@@ -94,6 +104,10 @@ bash examples/21-skillclaw-session-collection/run.sh \
 第 23 讲的双实例演练从持续巡检和检查点起步，注入模拟故障，再把真实 Hermes 工具回执和原生 SkillClaw 归档送进候选评测、发布与采用验证。默认使用脚本模型。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲大作业](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
 
 综合实践使用独立的支付状态查询案例，观察经历回流、评分器自检、同题比较和保留基线的决定。[综合实践](workshop/practice/README.md)
+
+## 运行离线检查
+
+在仓库根目录执行 `python3.12 -B scripts/check_offline.py`。这组检查只用 Python 标准库、Git 和 Bash，覆盖安装、会话证据、Memory 修订、业务评分和大作业的本地 HTTP 边界。GitHub Actions 使用同一入口在 Linux 和 macOS 上检查变更。真实 Hermes 和模型运行按各讲的命令单独验收。 [工作流定义](.github/workflows/course-checks.yml)
 
 ## 许可证
 

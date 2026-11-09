@@ -74,14 +74,13 @@ def wait_for_metrics(environments, predicate, timeout=45):
     raise RuntimeError("Timed out waiting for the two HTTP environments")
 
 
-def set_faults(environments, modes, *, cleanup=None):
+def set_faults(environments, modes, *, cleanup):
     injected = {}
     for alias, state in environments.items():
         flag = state / f"{TARGETS[alias]}.fault"
         injected[alias] = time.time()
-        with flag.open("w" if cleanup is None else "x", encoding="utf-8") as fault:
-            if cleanup is not None:
-                cleanup.callback(flag.unlink, missing_ok=True)
+        with flag.open("x", encoding="utf-8") as fault:
+            cleanup.callback(flag.unlink, missing_ok=True)
             fault.write("" if modes[alias] == "on" else "intermittent")
     return injected
 
@@ -105,7 +104,7 @@ def start_enterprise_faults(path, index, environments, healthy, faults, *, clean
             "environment_id": healthy[alias]["environment_id"],
             "decoy_service": decoy, "decoy_injected_at": decoy_time,
         }
-    for alias, injected_at in set_faults(environments, faults).items():
+    for alias, injected_at in set_faults(environments, faults, cleanup=cleanup).items():
         targets[alias]["injected_at"] = injected_at
     plan = {"round": index, "targets": targets}
     write_json(path / "fault-plan.json", plan)
@@ -717,7 +716,7 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
                         enterprise_round, index, environments, report["healthy_baseline"], faults, cleanup=stack,
                     )
                 else:
-                    set_faults(environments, faults)
+                    set_faults(environments, faults, cleanup=stack)
                 wait_for_metrics(
                     environments, lambda _alias, value: value["requests"] >= 25 and value["error_rate"] >= 0.05,
                 )
