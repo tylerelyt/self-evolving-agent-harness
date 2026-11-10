@@ -9,13 +9,13 @@ from pathlib import Path
 import re
 import sqlite3
 
-from environment import DIAGNOSTIC_V1, DIAGNOSTIC_V2, classify, load_json
+from environment import ALERT_SOURCE, DIAGNOSTIC_V1, DIAGNOSTIC_V2, classify, load_json
 from export_workset import (build_workset, recorded_probes, require, run_file, scoped_snapshot,
                             session_rows, verify_skill)
 from fact_handoff import read_evidence as read_handoff
 from fact_review import FACT_PREFIX, MEMORY_FILE
 from fleet_eval import CASES
-from hermes_runtime import ONCALL_SKILL
+from hermes_runtime import ONCALL_SKILL, PATROL_SKILL
 from patrol import STEER_PREFIX, decode_report
 from recovery_skill_flow import recovery_evidence
 from recovery_skill_task import gate_cases, read_evidence as read_recovery
@@ -120,7 +120,6 @@ def audit_rollback_patrol(root, directory, proof, previous_case, restored, injec
     require(re.fullmatch(rf"patrol-{service}-[0-9a-f]{{32}}", session)
             and re.fullmatch(rf"lab-{service}-[0-9a-f]{{12}}", incident)
             and re.fullmatch(r"[0-9a-f]{32}", record["turn_id"])
-            and incident == f"lab-{service}-{record['turn_id'][:12]}"
             and record["skill_sha256"] == restored, "Invalid restored patrol identity or Skill")
     observation = scoped_snapshot(json.loads(record["observation"]), service, environment)
     require(classify(observation) == "abnormal" and observation["error_rate"] > 0
@@ -197,8 +196,14 @@ def audit_rollback_patrol(root, directory, proof, previous_case, restored, injec
                     "Native rollback archive did not retain the steer for this incident")
             alert = json.loads(delivery.split(STEER_PREFIX, 1)[1].splitlines()[0])
             source = json.loads(row["content"])
-            require(alert == {"incident_id": incident, "service": service, "error_rate": source["error_rate"],
-                              "p95_ms": source["p95_ms"]}, "Rollback steer differs from its HTTP snapshot")
+            identity = {"incident_id": incident, "service": service}
+            if alert.get("source") == ALERT_SOURCE:
+                verify_monitor_alert(alert, incident, source, injected_at)
+            else:
+                require(incident == f"lab-{service}-{record['turn_id'][:12]}"
+                        and alert in ({**identity, "environment_id": source["environment_id"]},
+                                      {**identity, "error_rate": source["error_rate"], "p95_ms": source["p95_ms"]}),
+                        "Rollback steer differs from its HTTP snapshot")
     return session, incident
 
 
@@ -476,6 +481,103 @@ def audit_recovery_skill(root, report):
     return {"status": "passed", "gate_cases": len(gate_inputs), "adopted_sha256": candidate}
 
 
+def audit_patrol_skill(root, directory, records, expected):
+    db_path = run_file(root, directory / "hermes/state.db")
+    with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+        for record in records:
+            session, item = record["session_id"], record["evidence_item_id"]
+            prompt, = db.execute("SELECT MAX(id) FROM messages WHERE session_id=? AND role='user' AND id < ?",
+                                 (session, item)).fetchone()
+            rows = db.execute("""SELECT content FROM messages WHERE session_id=? AND role='tool'
+                AND tool_name='patrol_skill_view' AND id > ? AND id < ?""", (session, prompt, item)).fetchall()
+            require(rows, "Patrol must read the routine Skill before measuring")
+            result = json.loads(rows[-1][0])
+            require(result["success"] is True and result["name"] == PATROL_SKILL and result["sha256"] == expected
+                    and sha256(result["content"].encode("utf-8")).hexdigest() == expected,
+                    "Patrol Skill differs from the version that the fleet pinned")
+
+
+def verify_monitor_alert(alert, incident, observation, injected_at):
+    require(alert == {"incident_id": incident, "service": observation["service"],
+                      "environment_id": observation["environment_id"], "source": ALERT_SOURCE,
+                      "emitted_at": alert.get("emitted_at")}
+            and type(alert["emitted_at"]) in (int, float)
+            and injected_at <= alert["emitted_at"] <= observation["window_end"],
+            "Monitor alert is outside the incident scope or the injection timeline")
+
+
+def audit_patrol_loop(root, report):
+    workers = report["patrol_workers"]
+    require(workers.keys() == INSTANCES and len(set(workers.values())) == len(INSTANCES)
+            and all(type(pid) is int and pid > 0 for pid in workers.values()), "Invalid fleet worker identities")
+    last_recovery = dict.fromkeys(workers, 0)
+    pages = 0
+    for phase in report["rounds"]:
+        number = phase["round"]
+        loop_path = f"round-{number}/patrol-loop.json"
+        require(phase["patrol_loop"] == loop_path, "Unexpected patrol loop evidence path")
+        loops = read_json(root, loop_path)
+        proofs = read_json(root, phase["patrol_evidence"])
+        recovered = read_json(root, phase["recovery"])
+        lifecycle = read_json(root, phase["incident_lifecycle"])
+        require(loops.keys() == workers.keys(), "Patrol loop lacks both workers")
+        for alias, loop in loops.items():
+            directory = Path(f"round-{number}/collection") / alias
+            branch = proofs[alias]["investigation"]
+            incident = proofs[alias]["incident"]
+            incident_id = incident["incident_id"]
+            service, environment = branch["service"], branch["environment_id"]
+            before, resumed, healthy = (loop[key] for key in ("before", "resumed", "recovered"))
+            page = read_json(root, directory / "page.json")
+            detected = read_json(root, directory / "detected.json")
+            events = {event["kind"]: event["body"] for event in lifecycle["events"]
+                      if event["incident"] == incident_id}
+            require(detected == {"pid": workers[alias], "incident_id": incident_id}
+                    and page["incident_id"] == incident_id and page["scope"] == f"{alias}/{environment}/{service}"
+                    and page["channel"] == "local_oncall_inbox" and page["recipient"] == events["handoff"]["owner"]
+                    and page["evidence"] == events["handoff"]["evidence"]
+                    and page["session_id"] == branch["session_id"] and page["report_item_id"] == branch["report_item_id"]
+                    and page["report"] == branch["report"] and page["report"]["analysis"].strip()
+                    and page["report"]["recovery_plan"] == {"action": events["action_requested"]["action"],
+                        "approval_required": True, "verification": "two_clean_windows"},
+                    "The page does not carry the verified scoped investigation and recovery plan")
+            observation = json.loads(incident["observation"])
+            incident_time = observation["window_end"]
+            if "alert_source" in report:
+                alert = read_json(root, directory / "alert.json")
+                verify_monitor_alert(alert, incident_id, observation, loop["injected_at"])
+                delivery = incident["steer_delivery"].split(STEER_PREFIX, 1)[1].splitlines()[0]
+                require(report["alert_source"] == ALERT_SOURCE and json.loads(delivery) == alert,
+                        "Hermes steer does not carry the original monitoring event")
+            require(last_recovery[alias] <= before["checked_at"] < loop["injected_at"] <= incident_time
+                    <= branch["probes"][-1]["checked_at"] <= page["paged_at"] < resumed["checked_at"]
+                    <= events["action_executed"]["effect"]["cleared_at"] < recovered[alias]["window_end"]
+                    < healthy["checked_at"] and resumed["session_id"] == healthy["session_id"] == incident["session_id"],
+                    "Patrol did not resume on the same worker after paging and before recovery")
+            for path in (directory / "patrol.sqlite", Path("patrols") / alias / "patrol.sqlite"):
+                db_path = run_file(root, path)
+                with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+                    db.row_factory = sqlite3.Row
+                    for record in (before, resumed, healthy):
+                        row = db.execute("SELECT * FROM inspections WHERE id = ?", (record["id"],)).fetchone()
+                        observation = json.loads(record["observation"])
+                        require(row is not None and dict(row) == record and record["service"] == service
+                                and observation["environment_id"] == environment
+                                and record["status"] == classify(observation), "Patrol checkpoint differs from SQLite")
+                    closed = db.execute("SELECT recovered_inspection_id FROM incidents WHERE incident_id = ?",
+                                        (incident_id,)).fetchone()
+                    require(closed is not None and closed[0] == healthy["id"] and before["status"] == "healthy"
+                            and healthy["status"] == "healthy", "Patrol state does not link the closed incident to recovery")
+            if "patrol_skill_sha256" in report:
+                audit_patrol_skill(root, directory, (before, incident, resumed, healthy), report["patrol_skill_sha256"])
+            last_recovery[alias] = healthy["checked_at"]
+            pages += 1
+    result = {"status": "passed", "workers": len(workers), "pages": pages}
+    if "alert_source" in report:
+        result["monitor_alerts"] = pages
+    return result
+
+
 def audit_core(root, report):
     """Return named read-only checks for the completed two-round fleet."""
     root = root.resolve(strict=True)
@@ -496,6 +598,8 @@ def audit_core(root, report):
             "recovery_skill": audit_recovery_skill(root, report),
             "rollback": rollback,
         }
+        if "patrol_workers" in report or any("patrol_loop" in phase for phase in report["rounds"]):
+            checks["continuous_patrol"] = audit_patrol_loop(root, report)
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
     return checks

@@ -1,8 +1,8 @@
 # 第二阶段 · 第一项实作｜让巡检回合接手 On-call
 
-支付开始报错时，巡检 Agent 可能已经查到了新指标，正在准备照常写报告。告警要在这个时候改变它接下来做的事。我们让 Harness 把当前异常窗口交给同一回合里的 Hermes Agent，要求它马上核实请求、说明影响，并把证据交给值班人。
+支付开始报错时，巡检 Agent 可能正在读指标，准备照常写报告。实验环境里的监控替身在故障出现后发出告警。Harness 把这条告警交给对应的巡检回合，Agent 再核实请求、说明影响，并把证据交给值班人。
 
-这里用的是 Hermes 的 `AIAgent.steer()`。Harness 在指标工具完成时判断有没有达到告警阈值。如果达到，就把带事件 ID 的任务交给正在执行的 Agent。Hermes 等当前工具批次结束，将任务附在给模型的工具结果后面。模型先通过 `skill_view` 读取当前的 On-call Skill，再按其中的步骤调用 `oncall_probe`，向支付服务实际发一条请求。整个过程沿用同一个 Session 和巡检回合。
+监控替身将原始事件写入环境目录下的 `payments.alert.json`。Harness 在指标工具完成时读取这条事件，核对它对应的服务和环境，再调用 Hermes 的 `AIAgent.steer()`。Hermes 将任务附在给模型的工具结果后面。模型先通过 `skill_view` 读取当前的 On-call Skill，再按其中的步骤调用 `oncall_probe`，向支付服务实际发请求。整个过程沿用同一个 Session 和巡检回合。
 
 ## 注入故障
 
@@ -23,7 +23,7 @@ E=workshop/capstone/patrol/environment.py
 "$PY" "$E" fault payments on
 ```
 
-支付接下来会实际返回 HTTP 503。保持巡检进程运行，等支付进入新一轮抽查。窗口内至少有 10 个请求，且 5xx 比例达到 5% 或 P95 达到 500ms 时，Harness 向该回合投递 steer。终端出现 `incident_id` 后，可以查事件：
+支付接下来会实际返回 HTTP 503。监控替身在这次注入后观察到 5xx，就发出告警。保持巡检进程运行，等支付进入下一次抽查并接收告警。终端出现 `incident_id` 后，可以查事件。
 
 ```bash
 "$PY" "$P" incidents payments

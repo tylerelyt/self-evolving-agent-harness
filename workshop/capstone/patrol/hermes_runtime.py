@@ -20,8 +20,10 @@ SOURCE = ROOT / ".deps" / "hermes-agent"
 LESSON19 = ROOT / "examples" / "19-enterprise-dataset"
 LANGFUSE_PLUGIN = "observability/langfuse"
 ONCALL_SKILL = "oncall-alert-triage"
+PATROL_SKILL = "service-patrol"
 FOLLOWUP_PREFIX = "ONCALL_FOLLOWUP "
 TOOL_DESCRIPTIONS = {
+    "patrol_skill_view": "Read the approved service patrol Skill before inspecting the service.",
     "skill_view": "Read the active On-call Skill after receiving an alert.",
     "service_snapshot": "Read fresh HTTP metrics for the assigned service and its current time window.",
     "oncall_probe": "Make one HTTP request to the assigned lab service after an On-call steer.",
@@ -169,7 +171,7 @@ def read_oncall_skill(expected_sha, *, name=ONCALL_SKILL):
 
 
 def run_turn(db, session_id, prompt, tools, options, on_tool_complete=None, *,
-             capture_session=False, load_memory=False, skill_name=ONCALL_SKILL, task_id=None):
+             capture_session=False, load_memory=False, skill_name=ONCALL_SKILL, task_id=None, max_iterations=6):
     from hermes_cli.plugins import clear_thread_tool_whitelist, set_thread_tool_whitelist
     from run_agent import AIAgent
     from tools.registry import registry
@@ -225,7 +227,7 @@ def run_turn(db, session_id, prompt, tools, options, on_tool_complete=None, *,
         tool_complete_callback=tool_complete if on_tool_complete else None,
         **options, provider="custom", api_mode="chat_completions",
         session_id=session_id, session_db=db, enabled_toolsets=["course_patrol"],
-        max_iterations=6, max_tokens=2048, quiet_mode=True, skip_context_files=True,
+        max_iterations=max_iterations, max_tokens=2048, quiet_mode=True, skip_context_files=True,
         load_soul_identity=False, skip_memory=not load_memory, save_trajectories=False,
         request_overrides=request_overrides,
     )

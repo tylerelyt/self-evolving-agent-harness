@@ -8,7 +8,7 @@
 
 | 学习目标 | 入口 | 前置条件 |
 | --- | --- | --- |
-| 看一次评分器校准和版本采用决定 | [支付状态综合实践](workshop/practice/README.md) | Python 3.12，无需密钥 |
+| 看一次评分器校准和版本采用决定 | [支付查询短练习](workshop/practice/README.md) | Python 3.12，无需密钥 |
 | 按课学习 Agent 的执行过程 | [第 1 讲 Notebook](#从第-1-讲开始) | Python 3.12、Notebook 依赖。运行真实模型时需要 GLM 密钥 |
 | 实际运行两个巡检 Agent，看 Skill 如何发布与回退 | [第 23 讲大作业](workshop/capstone/README.md#运行双实例演练) | 固定版本的 Hermes 和 SkillClaw，默认模式无需密钥 |
 
@@ -31,7 +31,7 @@ python3.12 workshop/practice/replay.py --judge calibrated
 | 把真实经历整理成可重跑的题，再搜索更好的方法 | [19 企业数据集](examples/19-enterprise-dataset/) · [20 GEPA 离线优化](examples/20-gepa-offline-optimization/) |
 | 汇集多个实例的经历，让共同方法到达下一次任务 | [21 SkillClaw 收集与蒸馏](examples/21-skillclaw-session-collection/) · [22 验证发布与分发](examples/22-skillclaw-shared-revision/) |
 | 从持续巡检跑到候选评测、版本采用与恢复 | [23 双实例 On-call 大作业](workshop/capstone/README.md) |
-| 用固定订单成对比较两版方法，依据评分决定是否切换 | [综合实践 · 跑完一次学习循环](workshop/practice/README.md) |
+| 用固定订单成对比较两版方法，依据评分决定是否切换 | [支付查询短练习](workshop/practice/README.md) |
 
 完整讲次见[课程与代码对照](COURSE_MAP.md)。第 10 讲在正文中安排 Hermes 手动观察题，记录一次任务留下的 Memory、Skill 和新会话中的使用情况。
 
@@ -103,7 +103,7 @@ bash examples/21-skillclaw-session-collection/run.sh \
 
 第 23 讲的双实例演练从持续巡检和检查点起步，注入模拟故障，再把真实 Hermes 工具回执和原生 SkillClaw 归档送进候选评测、发布与采用验证。默认使用脚本模型。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲大作业](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
 
-综合实践使用独立的支付状态查询案例，观察经历回流、评分器自检、同题比较和保留基线的决定。[综合实践](workshop/practice/README.md)
+综合一讲把持续巡检、事故交接、Skill 放行和下一轮采用接起来。 [四关实作](workshop/capstone/lab/README.md)
 
 ## 运行离线检查
 

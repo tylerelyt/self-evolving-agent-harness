@@ -1,6 +1,6 @@
 # 结课大作业｜让多实例巡检共同改进值班 Skill
 
-学员接手订单、支付、库存和通知四类本地服务。同一实验中，两个 Hermes Agent 同时巡检各自负责的范围。各自发现异常后，正在运行的 Agent 收到原生 steer，读取当前正式 Skill 并调查。两个 Agent 将完成的值班会话归档到同一 SkillClaw 共享组。Evolve Server 汇集这些经历，提出一份共享 Skill 候选。候选通过业务验收才发布给两个 Agent，由各自的新任务读回并产生下一轮经历。
+学员接手订单、支付、库存和通知四类本地服务。同一实验中，两个 Hermes Agent 同时巡检各自负责的范围。实验环境模拟外部监控服务，注入故障并发出带事故 ID 的告警。Harness 通过原生 steer 把这条告警交给正在运行的 Agent，Agent 读取当前正式 Skill 并调查。两个 Agent 将完成的值班会话归档到同一 SkillClaw 共享组。Evolve Server 汇集这些经历，提出一份共享 Skill 候选。候选通过业务验收才发布给两个 Agent，由各自的新任务读回并产生下一轮经历。
 
 现有巡检已用真实 HTTP 流量验证故障注入、同回合 steer、Skill 读取、503 探测、事件去重和恢复。课程第 21、22 讲已有双实例采集、原生演化与同步的独立练习，事故状态机和业务评测也有独立入口。双实例入口接通了实时巡检、分支补查、审批处置、原生会话归档、候选演化、业务回放和双端同步读回。演练结束后按事故导出 HTTP 工作样本，可用 Hermes 重新执行初判。下文同时列出各组件的职责与验收出口。配套代码位于仓库的 workshop/capstone 目录。[tylerelyt/self-evolving-agent-harness](https://github.com/tylerelyt/self-evolving-agent-harness)
 

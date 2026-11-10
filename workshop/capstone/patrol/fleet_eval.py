@@ -8,8 +8,8 @@ import os
 from pathlib import Path
 import sqlite3
 
-from environment import write_json
-from hermes_runtime import ONCALL_SKILL, install_oncall_skill, open_sessions
+from environment import alert_event, write_json
+from hermes_runtime import ONCALL_SKILL, PATROL_SKILL, install_oncall_skill, open_sessions
 from patrol import connect, decode_report, inspect_service
 
 
@@ -102,9 +102,11 @@ def replay(case, state, skill, options):
     try:
         with closing(connect(state)) as db, open_sessions(state) as sessions:
             digest = install_oncall_skill(state, skill)
+            patrol_sha = install_oncall_skill(state, name=PATROL_SKILL)
             record = inspect_service(
                 sessions, db, case.service, state, options, digest,
-                snapshot=case.snapshot, probe_request=probe,
+                patrol_skill_sha=patrol_sha, snapshot=case.snapshot, probe_request=probe,
+                incoming_alert=alert_event(snapshot, emitted_at=snapshot["window_end"]),
             )
             verified_skill, probes, report = read_receipts(sessions, record, digest)
     except (RuntimeError, OSError, ValueError, KeyError, TypeError, sqlite3.Error) as exc:
@@ -143,7 +145,15 @@ def replay(case, state, skill, options):
     }
 
 
-def evaluate(root: Path, baseline: Path, candidate: Path, options: dict, *, cases=CASES) -> dict:
+def release_allowed(results, baseline_sha, candidate_sha):
+    return (baseline_sha != candidate_sha
+            and all(row["baseline"]["valid_trace"] and row["candidate"]["valid_trace"]
+                    and row["candidate"]["passed"] for row in results)
+            and any(not row["baseline"]["passed"] for row in results))
+
+
+def evaluate(root: Path, baseline: Path, candidate: Path, options: dict, *, cases=CASES,
+             release_policy=release_allowed) -> dict:
     """Run identical cases in fresh Hermes homes and record the comparison."""
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -180,7 +190,7 @@ def evaluate(root: Path, baseline: Path, candidate: Path, options: dict, *, case
     baseline_sha = skills["baseline"]["sha256"]
     candidate_sha = skills["candidate"]["sha256"]
     decision = {
-        "passed": comparable and candidate_passed_all and bool(improved) and baseline_sha != candidate_sha,
+        "passed": release_policy(results, baseline_sha, candidate_sha),
         "model": options["model"],
         "baseline_sha256": baseline_sha,
         "candidate_sha256": candidate_sha,

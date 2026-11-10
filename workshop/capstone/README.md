@@ -2,7 +2,18 @@
 
 这个项目让多个 Hermes Agent 同时巡检各自负责的范围。它们将各自的调查会话交给同一个 SkillClaw 共享组，汇集证据形成 Skill 候选。通过对照评测的版本再同步给巡检实例，由下一轮任务验证是否真正用上。
 
+第一次做大作业，先从[四关动手实作](lab/README.md)开始。现场和巡检已经能跑，你只需依次补上告警投递、分支调查、值班交接和候选放行。每关用实际 Hermes 回执验收，前三关完成后能带着自己写的代码持续值守。
+
+先选一种跑法。下面的命令都用本机脚本模型，无需 API key。
+
+| 你想观察什么 | 从哪里开始 | 运行到哪里 |
+| --- | --- | --- |
+| 自己触发一次故障，观察一个 Hermes 如何从巡检转入调查，再回到巡检 | [手动持续值守](#手动持续值守) | 故障由你打开和关闭。巡检持续到你按 Ctrl-C |
+| 看两个 Hermes 怎样用各自的事故经历改进同一份 Skill | [运行双实例演练](#运行双实例演练) | 脚本自动注入故障、演练恢复并核对版本采用。两轮完成后退出 |
+
 [课程总装方案与第 10—23 讲计划验收项](INTEGRATION-PLAN.md)
+
+[`service-patrol`](patrol/skills/service-patrol/SKILL.md) 定义例行巡检的取数、历史检索和报告。Hermes 每轮通过 `patrol_skill_view` 读取它。收到异常后，同一回合用 `skill_view` 读取 [`oncall-alert-triage`](patrol/skills/oncall-alert-triage/SKILL.md)，按照该 Skill 完成初判和后续交接。
 
 | 阶段 | 要交付的能力 | 实作状态 |
 | --- | --- | --- |
@@ -11,6 +22,8 @@
 | 三 · 从值守中改进 | 聚合多实例会话，回放评测、发布并验证两端采用 | [双实例演练入口](patrol/fleet.py) |
 
 ## 运行双实例演练
+
+### 准备并启动
 
 在仓库根目录运行。需要 Git、Bash，以及 Python 3.12 或 `uv`。安装脚本会准备课程固定版本的 Hermes 和 SkillClaw。参考运行在 macOS 验证。
 
@@ -21,11 +34,21 @@ bash scripts/setup_skillclaw.sh
   --out workshop/capstone/runtime/fleet-demo
 ```
 
-输出目录须为新目录。演练启动两个独立 HTTP 环境。两个 Hermes 进程并行巡检，分别调查支付持续失败与订单间歇失败。每个实例有自己的 SessionDB 和 SkillClaw Client Proxy。巡检只访问实验的本机回环地址。中断时会清理本次注入的故障，保留失败报告供检查。
+重跑时换一个尚不存在的 `--out` 目录。演练启动两个独立 HTTP 环境和两条持续巡检循环。A、B 各用一个进程和一套检查点。先等两端分别提交健康巡检记录，再注入支付持续失败和订单间歇失败。巡检只访问实验的本机回环地址。中断时会清理本次注入的故障，保留失败报告供检查。
 
-初判报告落盘后，Hermes 从该事故的报告 Item 创建长调查分支，重新读取同一版 Skill，再为目标服务依次发出三次新探测。报告按回执区分持续失败、间歇失败或本次未复现，根因记为未知。分支保留父 Session 和原报告 Item，供审批回查。每轮进入 SkillClaw 的仍是两个原始初判会话。
+### 跑完先看三份记录
 
-分支复现故障且事故、环境和服务都吻合时，状态机引用长调查报告请求处置。脚本模拟值班员 `lab-oncall-approver` 的批准，每份批准绑定事故 ID、环境、服务和清除本地故障的动作。处置后，两边各取得两个互不重叠、5xx 为零的 30 秒窗口才关闭事故。演练完成两轮，等待恢复窗口约需两分钟。
+终端最后会打印 `report.json` 的路径。以下文件都在这次的 `--out` 目录中。
+
+1. 打开 `round-1/patrol-loop.json`，看两个 Agent 何时写下健康检查点，发出值班通知后何时恢复巡检。
+2. 打开 `report.json`，看 `status` 是否为 `complete`，再读第一轮的 `decision`。若发布了候选，对照第二轮的 `adoption_verified`。
+3. 回到 `round-2/collection/patrol-evidence.json`，选一个实例，对照它实际读取的 Skill 哈希和探测回执。由这条记录判断新一轮用到了什么。
+
+### 演练各阶段与完整证据
+
+实验环境模拟告警日志监控服务，注入故障后发出带事故 ID 的告警。Harness 收到告警后，通过 steer 将原始事件交给当前巡检回合。Hermes 读取获准的 `oncall-alert-triage` Skill，按它完成初判、补查和交接。初判落盘后，Hermes 从事故报告 Item fork，重新读取同一版 Skill，给出调查结论和恢复方案。方案及源 Session、报告 Item 写入实验内的值班收件箱，并在终端显示通知。收到这份交接回执后，原巡检进程继续检查服务。每轮进入 SkillClaw 的是两个由 Client Proxy 归档的初判会话。
+
+通知后的实验处置由状态机控制。脚本模拟值班员 `lab-oncall-approver` 的批准，每份批准绑定事故 ID、环境、服务和清除本地故障的动作。处置后，两边各取得两个互不重叠、5xx 为零的 30 秒窗口才关闭事故，再把恢复检查点关联回巡检库。两个进程贯穿两轮演练，等待恢复窗口约需两分钟。
 
 每轮事故关闭后，编排器把已保存的探测与恢复证据交给隔离的 Hermes Background Review。复盘可以保留原状，也可以在自己的 Home 里提出历史事实。编排器逐字段核对来源与回执，再写入共享 SQLite。第二轮注入故障前，A 与 B 各开一个空会话接班，通过 `memory_lookup` 查询对方上一轮的事故，再用 `service_snapshot` 读取当前环境。历史事实提供当时发生了什么，当前状态由这一次 HTTP 指标决定。
 
@@ -43,7 +66,10 @@ bash scripts/setup_skillclaw.sh
 | --- | --- |
 | `report.json` | 每轮起始和采用后的 Skill 哈希、演化决定、两端采用验证和恢复记录 |
 | `round-*/collection/patrol-evidence.json` | 两端的事故、Skill 实际读取、初判探测和各实例的 `investigation` 记录 |
+| `round-*/collection/<实例>/alert.json` | 监控替身发出的原始告警，含事故 ID、服务、环境和发送时间 |
 | `round-*/collection/<实例>/investigation.json` | 长调查的父 Session、报告 Item、分支 Session、三次新探测和报告，也是本轮处置依据 |
+| `round-*/collection/<实例>/page.json` | 本地值班收件箱回执，含事故范围、调查结论、恢复方案和分支报告 Item |
+| `round-*/patrol-loop.json` | 注入前的健康检查点、通知后恢复的检查点、关闭后关联回巡检库的恢复检查点 |
 | `round-*/incident-lifecycle.json` | 事故范围、批准与实际故障开关回执、两个恢复窗口和关闭记录 |
 | `round-*/fact-review/<实例>/proposal.json` | 隔离复盘的候选事实、来源证据哈希和本地写入结果 |
 | `shared-facts.sqlite3` | 已逐项核对、带来源 Session 和 Item 的历史事实 |
@@ -55,6 +81,58 @@ bash scripts/setup_skillclaw.sh
 | `round-*/evaluation/evaluation.json` | 有候选时生成，含新旧版本的逐题工具证据和门槛决定 |
 | `round-*/recovery.json` | 两端关闭事故时的最终恢复窗口 |
 | `http-workset.json` | 完成演练后生成的 HTTP 工作样本，每起事故一条 |
+
+## 手动持续值守
+
+从仓库根目录打开三个终端。需要 Git、Bash，以及 Python 3.12 或 `uv`。终端 A 会创建本轮独立的状态目录，再在里面启动四个本机 HTTP 服务和模拟流量。
+
+```bash
+bash scripts/setup_deps.sh
+mkdir -p workshop/capstone/runtime
+PATROL_STATE=$(mktemp -d workshop/capstone/runtime/manual.XXXXXX)
+printf '本轮巡检目录 %s\n' "$PATROL_STATE"
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
+  --state "$PATROL_STATE" serve
+```
+
+终端 A 打印服务地址后，把它给出的巡检目录粘贴到终端 B 的提示里。先确认 `environment.status` 为 `ready`，再启动巡检。默认每轮抽查两个服务，每轮结束后间隔 5 秒。巡检会持续到按 Ctrl-C 为止。
+
+```bash
+printf '本轮巡检目录 '
+IFS= read -r PATROL_STATE
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
+  --state "$PATROL_STATE" status
+```
+
+```bash
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
+  --state "$PATROL_STATE" run --oncall --page-oncall --interval 5 --offline
+```
+
+终端 C 使用同一目录。等 `services.payments.checkpoint.status` 为 `healthy`，并确认 `matches_environment` 为 `true`，再打开故障。`live` 字段来自当前 HTTP 遥测，`checkpoint` 来自已提交的巡检。两者分开看，可以确认 Agent 已经用这次环境的数据完成过一轮任务。
+
+```bash
+printf '本轮巡检目录 '
+IFS= read -r PATROL_STATE
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
+  --state "$PATROL_STATE" status
+```
+
+```bash
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
+  --state "$PATROL_STATE" fault payments on
+```
+
+终端 B 会出现值班提示。重新运行 `status`，从 `services.payments.last_incident.page_receipt` 找到通知，同目录的 `investigation.json` 是分支报告。巡检接着运行。读完恢复方案，在终端 C 关闭故障，再检查事故记录。
+
+```bash
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
+  --state "$PATROL_STATE" fault payments off
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
+  --state "$PATROL_STATE" status
+```
+
+巡检观察到两个互不重叠的 30 秒健康窗口后，会在 `last_incident` 里留下 `recovered_inspection_id`。等待期间可以重复运行 `status`。它只读取 HTTP 指标和已经落盘的记录，输出里的 Session 和 Item 可以用来核对原始会话。结束时先停止终端 B 的巡检，再停止终端 A 的服务，本轮记录仍在独立目录里。检查点和会话分支的用法见[巡检实作](patrol/LAB.md)。
 
 ## 用 OpenViking 做跨实例交班
 
@@ -208,7 +286,7 @@ fi
 
 `passed` 表示对应的证据通过核对，`pending` 表示仍缺少所需证据，`not_requested` 表示这次演练未启用该模块。默认退出码为 0 表示所提供的证据通过核对，报告仍可能列出待验证项。证据损坏、错配或演练未完成时，退出码为 1。
 
-自动化验收时，可重复传入 `--require` 指定必须通过的检查。例如回退演练使用 `--require core.rollback`。指定的检查缺失、待验证或未启用时，JSON 仍会输出，命令以退出码 2 结束。
+自动化验收时，可重复传入 `--require` 指定必须通过的检查。持续巡检使用 `--require core.continuous_patrol`，回退演练使用 `--require core.rollback`。指定的检查缺失、待验证或未启用时，JSON 仍会输出，命令以退出码 2 结束。
 
 ## 回放一次已完成的事故初判
 
@@ -235,4 +313,4 @@ SKILL_SHA='填入 skill_sha256'
   --run "$RUN" --out "$RUN/http-workset-copy.json"
 ```
 
-HTTP 样本标为 `working_only`。跨服务根因评测可用上面的企业题入口，Langfuse 原生采集和 OpenViking 在[总装方案](INTEGRATION-PLAN.md)中另列接线。也可以做[值班学习与回退实作](LEARNING-LAB.md)，在固定事故快照上单独观察版本决定。专栏的支付状态查询案例见[综合实践](../practice/README.md)。
+HTTP 样本标为 `working_only`。跨服务根因评测可用上面的企业题入口，Langfuse 原生采集和 OpenViking 在[总装方案](INTEGRATION-PLAN.md)中另列接线。也可以做[值班学习与回退实作](LEARNING-LAB.md)，在固定事故快照上单独观察版本决定。 [支付查询短练习](../practice/README.md)

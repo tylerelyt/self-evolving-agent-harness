@@ -2,15 +2,16 @@
 """Fork a persisted On-call report and investigate with fresh, scoped HTTP evidence."""
 
 import argparse
-from contextlib import closing
+from contextlib import closing, nullcontext
 import json
 import os
 from pathlib import Path
 import sqlite3
 import sys
 from threading import Lock
+import time
 
-from environment import DEFAULT_STATE, SERVICES, get_snapshot, probe_service
+from environment import DEFAULT_STATE, SERVICES, get_snapshot, probe_service, write_json
 from hermes_runtime import (FOLLOWUP_PREFIX, ONCALL_SKILL, checkpoint_rows, ensure_loopback_no_proxy,
                             fork, open_sessions, read_oncall_skill, run_turn)
 from patrol import connect, decode_report, incidents, model_connection, writer_lock
@@ -45,7 +46,7 @@ def followup_receipts(rows, scope, skill_sha):
     return skill_items[0], probes
 
 
-def investigate(state, environment_state, record, options, *, langfuse=False):
+def investigate(state, environment_state, record, options, *, langfuse=False, sessions=None, branch_report=fork):
     original = json.loads(record["observation"])
     service = original["service"]
     environment_id = original["environment_id"]
@@ -75,21 +76,17 @@ def investigate(state, environment_state, record, options, *, langfuse=False):
             return probe_service(environment_state, service, environment_id=environment_id)
 
     prompt = FOLLOWUP_PREFIX + json.dumps(scope, ensure_ascii=False) + "\n" + (
-        f"从上一轮交接继续调查。先用 skill_view 读取 {ONCALL_SKILL}，然后用 followup_probe "
-        "在当前事故范围内逐次发出三次新探测。每次等到回执才决定下一次调用。"
-        "仅依据这三次回执填写 probe_http_statuses。全为 5xx 判 persistent，"
-        "同时观察到 2xx 和 5xx 判 intermittent，全为 2xx 判 not_reproduced。"
-        "只输出 JSON 对象，含 incident_id、service、environment_id、probe_http_statuses、assessment、"
-        "root_cause（现有证据仅覆盖 HTTP，固定填 unknown）。此任务只调查。"
+        f"用 skill_view 读取 {ONCALL_SKILL}，执行其中的事故补查与值班交接任务。"
     )
-    with open_sessions(state, langfuse=langfuse) as sessions:
+    connection = open_sessions(state, langfuse=langfuse) if sessions is None else nullcontext(sessions)
+    with connection as sessions:
         with writer_lock(state), closing(sqlite3.connect(state / "patrol.sqlite")) as patrol_db:
             saved = patrol_db.execute("SELECT recovered_inspection_id FROM incidents WHERE incident_id = ?",
                                       (scope["incident_id"],)).fetchone()
             if saved is None or saved[0] is not None:
                 raise RuntimeError("The incident was closed before the follow-up started")
             prefix = checkpoint_rows(sessions, record)
-            child, copies = fork(sessions, record)
+            child, copies = branch_report(sessions, record)
         rows, _ = run_turn(sessions, child, prompt,
                            {"skill_view": skill_view, "followup_probe": followup_probe}, options,
                            task_id="followup-" + record["turn_id"] if langfuse else None)
@@ -101,8 +98,12 @@ def investigate(state, environment_state, record, options, *, langfuse=False):
     statuses = [probe["http_status"] for probe in probes]
     failures = sum(status >= 500 for status in statuses)
     assessment = "persistent" if failures == PROBE_COUNT else "intermittent" if failures else "not_reproduced"
-    expected = {**scope, "probe_http_statuses": statuses, "assessment": assessment, "root_cause": "unknown"}
-    if not isinstance(report, dict) or any(report.get(key) != value for key, value in expected.items()):
+    plan = {"action": "clear_lab_fault" if failures else "observe", "approval_required": bool(failures),
+            "verification": "two_clean_windows" if failures else "continue_patrol"}
+    expected = {**scope, "probe_http_statuses": statuses, "assessment": assessment,
+                "root_cause": "unknown", "recovery_plan": plan}
+    if (not isinstance(report, dict) or any(report.get(key) != value for key, value in expected.items())
+            or not isinstance(report.get("analysis"), str) or not report["analysis"].strip()):
         raise RuntimeError("The follow-up report does not match the branch evidence")
     return {
         **scope,
@@ -111,6 +112,17 @@ def investigate(state, environment_state, record, options, *, langfuse=False):
         "skill_sha256": skill_sha, "skill_item_id": skill_item, "report_item_id": rows[-1]["id"],
         "probes": probes, "report": report,
     }
+
+
+def page_operator(path, recipient, scope, result, evidence):
+    page = {
+        "incident_id": result["incident_id"], "scope": scope, "recipient": recipient,
+        "channel": "local_oncall_inbox", "paged_at": time.time(), "evidence": evidence,
+        "session_id": result["session_id"], "report_item_id": result["report_item_id"], "report": result["report"],
+    }
+    write_json(path, page)
+    print(f"Page {recipient}: {scope} — {page['report']['analysis']} ({path})", file=sys.stderr, flush=True)
+    return page
 
 
 def main():

@@ -125,7 +125,7 @@ def session_probes(path, proof, branch, snapshot, digest):
     return patrol, investigation
 
 
-def recovery_evidence(lifecycle, last_window, case, branch_path):
+def recovery_evidence(lifecycle, last_window, case, branch_path, *, paged=False):
     incident = case["incident_id"]
     snapshot = case["snapshot"]
     service = snapshot["service"]
@@ -137,9 +137,17 @@ def recovery_evidence(lifecycle, last_window, case, branch_path):
             and states[0]["scope"] == scope and states[0]["skill"] == case["skill_sha256"]
             and states[0]["evidence"] == branch_path,
             "Incident lifecycle does not close with scoped investigation and recovery")
-    require([event["kind"] for event in events] == ["observation", "investigation_started", "action_requested",
-            "action_approved", "action_executed", "observation", "observation", "closed"],
+    kinds = ["observation", "investigation_started", "action_requested", "action_approved",
+             "action_executed", "observation", "observation", "closed"]
+    if paged:
+        kinds.insert(3, "handoff")
+    require([event["kind"] for event in events] == kinds,
             "Incident lifecycle lacks ordered observation, approval and recovery events")
+    if paged:
+        handoff = events.pop(3)["body"]
+        require(handoff["state"] == "AWAITING_APPROVAL" and handoff["evidence"] == branch_path
+                and handoff["pending"] == [events[2]["body"]["operation"]]
+                and handoff["owner"] == events[3]["body"]["actor"], "Invalid on-call handoff")
     trigger, started, requested, approved, executed, first, second, _ = (event["body"] for event in events)
     require(trigger["evidence"] == snapshot and trigger["quality"] == "unhealthy" and trigger["scope"] == scope
             and started["skill_sha256"] == case["skill_sha256"] and requested["evidence"] == branch_path
@@ -215,7 +223,8 @@ def export_case(run, round_data, instance, proof, lifecycle, last_window):
         "investigation": {"probe_statuses": followup, "assessment": assessment, "root_cause": "unknown"},
     }
     case["recovery_windows"] = recovery_evidence(lifecycle, last_window, case,
-                                                  branch_relative.relative_to(f"round-{number}").as_posix())
+                                                  branch_relative.relative_to(f"round-{number}").as_posix(),
+                                                  paged="patrol_loop" in round_data)
     return case
 
 

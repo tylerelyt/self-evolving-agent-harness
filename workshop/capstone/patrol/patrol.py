@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -13,9 +14,10 @@ import uuid
 from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 
-from environment import DEFAULT_STATE, SERVICES, classify, get_snapshot, probe_service
+from environment import (ALERT_SOURCE, DEFAULT_STATE, SERVICES, classify, get_snapshot, load_json,
+                         probe_service, read_alert, write_json)
 from fixture import respond
-from hermes_runtime import (ONCALL_SKILL, checkpoint_rows, ensure_loopback_no_proxy, fork,
+from hermes_runtime import (ONCALL_SKILL, PATROL_SKILL, checkpoint_rows, ensure_loopback_no_proxy, fork,
                             install_oncall_skill, open_sessions, read_oncall_skill, run_turn)
 
 ENVIRONMENT = "lab"
@@ -33,9 +35,12 @@ def decode_report(content):
         text = text.split("\n", 1)[1][:-3].strip()
     return json.loads(text)
 
-def connect(state):
-    db = sqlite3.connect(state / "patrol.sqlite")
+def connect(state, *, readonly=False):
+    path = state / "patrol.sqlite"
+    db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) if readonly else sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    if readonly:
+        return db
     db.execute("PRAGMA foreign_keys = ON")
     db.executescript("""
         CREATE TABLE IF NOT EXISTS inspections (
@@ -113,6 +118,72 @@ def incidents(db, service):
     return [dict(row) for row in rows]
 
 
+def read_live_status(environment_state, service):
+    try:
+        metrics = get_snapshot(environment_state, service)
+        environment_id = metrics["environment_id"]
+        if (metrics["source"] != "live_lab_http_requests"
+                or not isinstance(environment_id, str) or not environment_id):
+            raise ValueError("Invalid lab metrics scope")
+        return {"state": "reachable", "environment_id": environment_id, "health": classify(metrics),
+                "requests": metrics["requests"], "window_end": metrics["window_end"]}
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        return {"state": "unavailable", "error": type(exc).__name__}
+
+
+def record_scope(record, live):
+    environment_id = json.loads(record["observation"])["environment_id"]
+    observed_id = live.get("environment_id")
+    return {"environment_id": environment_id,
+            "matches_environment": None if observed_id is None else environment_id == observed_id}
+
+
+def read_status(state, environment_state):
+    """Summarize live HTTP readiness and durable evidence without opening an Agent session."""
+    has_manifest = (environment_state / "environment.json").is_file()
+    services = {
+        service: {"live": read_live_status(environment_state, service) if has_manifest else {"state": "not_started"},
+                  "checkpoint": None, "last_incident": None}
+        for service in SERVICES
+    }
+    live_ids = {entry["live"].get("environment_id") for entry in services.values()}
+    if not has_manifest:
+        environment_status = "not_started"
+    elif None in live_ids:
+        environment_status = "unavailable"
+    elif len(live_ids) != 1:
+        environment_status = "mixed_environment"
+    else:
+        environment_status = "ready"
+
+    database = state / "patrol.sqlite"
+    if database.is_file():
+        with closing(connect(state, readonly=True)) as db:
+            db.execute("BEGIN")
+            for service, entry in services.items():
+                record = checkpoint(db, service)
+                if record:
+                    evidence = ("id", "checked_at", "status", "session_id", "turn_id",
+                                "evidence_item_id", "report_item_id")
+                    entry["checkpoint"] = {key: record[key] for key in evidence}
+                    entry["checkpoint"].update(record_scope(record, entry["live"]))
+                saved_incidents = incidents(db, service)
+                if saved_incidents:
+                    latest = saved_incidents[0]
+                    incident_id = latest["incident_id"]
+                    receipt = state / "pages" / incident_id / "page.json"
+                    entry["last_incident"] = {
+                        **record_scope(latest, entry["live"]),
+                        "incident_id": incident_id, "session_id": latest["session_id"],
+                        "report_item_id": latest["report_item_id"],
+                        "recovered_inspection_id": latest["recovered_inspection_id"],
+                        "page_receipt": str(receipt) if Path(incident_id).name == incident_id and receipt.is_file() else None,
+                    }
+    return {"schema": "capstone-patrol-status-v1", "state": str(state),
+            "environment": {"state": str(environment_state), "status": environment_status},
+            "patrol_database": str(database) if database.is_file() else None, "services": services}
+
+
 def publish(db, service, observation, report, session_id, turn_id, evidence, message, incident, active):
     with db:
         record_id = db.execute("""
@@ -145,33 +216,44 @@ def publish(db, service, observation, report, session_id, turn_id, evidence, mes
     return record
 
 
+def steer_oncall(steer, alert):
+    return steer(f"{STEER_PREFIX}{dump(alert)}\n"
+                 f"用 skill_view 读取 {ONCALL_SKILL}，执行其中的告警初判任务。")
+
+
 def inspect_service(sessions, db, service, state, options, skill_sha, *,
-                    snapshot=get_snapshot, probe_request=probe_service, capture_session=False, langfuse=False):
+                    patrol_skill_sha, snapshot=get_snapshot, probe_request=probe_service,
+                    capture_session=False, langfuse=False,
+                    fresh_session=False, auto_recover=True, incoming_alert=None, route_alert=steer_oncall):
     last = checkpoint(db, service)
-    session_id = last["session_id"] if last else "patrol-" + service + "-" + uuid.uuid4().hex
+    session_id = last["session_id"] if last and not fresh_session else "patrol-" + service + "-" + uuid.uuid4().hex
     turn_id = uuid.uuid4().hex
-    active = next((row for row in incidents(db, service) if row["recovered_inspection_id"] is None), None)
+    records = incidents(db, service)
+    seen_alerts = {row["incident_id"] for row in records}
+    open_incidents = [row for row in records if row["recovered_inspection_id"] is None]
+    active = None
     alert_id = None
     skill_read = False
+    patrol_read = False
 
-    def check_alert(steer, name, receipt):
+    def deliver_alert(steer, name, receipt):
         nonlocal alert_id
         if name != "service_snapshot" or active or alert_id:
             return
         metrics = json.loads(receipt)
-        if metrics.get("error") or classify(metrics) != "abnormal":
+        if metrics.get("error"):
             return
-        candidate = f"lab-{service}-{turn_id[:12]}"
-        alert = dump({"incident_id": candidate, "service": service,
-                      "error_rate": metrics["error_rate"], "p95_ms": metrics["p95_ms"]})
-        instruction = (
-            f"{STEER_PREFIX}{alert}\n"
-            f"切换到 On-call 调查。先用 skill_view 读取 {ONCALL_SKILL} 并遵循其中步骤。"
-            "仍按巡检格式输出，增加 incident_id 与 probe_http_status。"
-            "在 summary 写明已确认的影响、尚不确定的原因和建议处置，保留历史对照。"
-            "只做调查和交接，环境开关由学员操作。"
-        )
-        if steer(instruction):
+        alert = incoming_alert if incoming_alert is not None else read_alert(state, service)
+        if not alert:
+            return
+        candidate = alert["incident_id"]
+        emitted_at = alert["emitted_at"]
+        if (alert["source"] != ALERT_SOURCE or alert["service"] != service
+                or alert["environment_id"] != metrics["environment_id"]
+                or type(emitted_at) not in (int, float) or not 0 < emitted_at <= metrics["window_end"]
+                or not re.fullmatch(rf"lab-{service}-[0-9a-f]{{12}}", candidate) or candidate in seen_alerts):
+            return
+        if route_alert(steer, alert):
             alert_id = candidate
 
     def load_skill():
@@ -180,6 +262,12 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
             return {"error": "No On-call steer was accepted for this turn"}
         receipt = read_oncall_skill(skill_sha)
         skill_read = True
+        return receipt
+
+    def load_patrol_skill():
+        nonlocal patrol_read
+        receipt = read_oncall_skill(patrol_skill_sha, name=PATROL_SKILL)
+        patrol_read = True
         return receipt
 
     def probe():
@@ -191,8 +279,14 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
             return {"error": f"Cannot probe {service}: {exc}"}
 
     def current():
+        nonlocal active
+        if not patrol_read:
+            return {"error": "Read the assigned patrol Skill before taking measurements"}
         try:
-            return dict(snapshot(state, service), history_available=last is not None)
+            metrics = snapshot(state, service)
+            active = next((row for row in open_incidents if json.loads(row["observation"])["environment_id"]
+                           == metrics["environment_id"]), None)
+            return dict(metrics, history_available=last is not None)
         except (URLError, OSError, ValueError, KeyError, RuntimeError) as exc:
             return {"error": f"Cannot read {service} metrics: {exc}"}
 
@@ -202,19 +296,16 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
 
     prompt = (
         f"巡检 {service}/{ENVIRONMENT}/{REGION}，巡检编号 {turn_id}。"
-        "先调用 service_snapshot 获取当前窗口。有历史可对照时调用 search_inspections。"
-        "读取失败则报告 unavailable。低于 10 个请求判 insufficient。"
-        "否则 5xx 达到 5% 或 P95 达到 500ms 判 abnormal，其余 healthy。"
-        "只输出 JSON 对象，包含 status、history_id（引用的历史记录整数 ID，未引用为 null）"
-        "和中文 summary（写明请求数、5xx 比例、P95 及判断依据）。"
+        f"调用 patrol_skill_view 读取 {PATROL_SKILL}，按其中的例行巡检任务执行。"
     )
-    tools = {"service_snapshot": current, "search_inspections": previous}
+    # Keep patrol method reads separate from the On-call SkillClaw evolution target.
+    tools = {"patrol_skill_view": load_patrol_skill, "service_snapshot": current, "search_inspections": previous}
     if skill_sha:
         tools.update(skill_view=load_skill, oncall_probe=probe)
         prompt += "只有收到本轮 Hermes steer 的 ONCALL_ALERT 才进入 On-call 调查。"
     rows, transcript = run_turn(
-        sessions, session_id, prompt, tools, options, check_alert if skill_sha else None,
-        capture_session=capture_session, task_id=turn_id if langfuse else None,
+        sessions, session_id, prompt, tools, options, deliver_alert if skill_sha else None,
+        capture_session=capture_session, task_id=turn_id if langfuse else None, max_iterations=7,
     )
     calls = {call["id"]: call["function"]["name"] for row in rows for call in row.get("tool_calls") or []}
     evidence = next((row for row in reversed(rows)
@@ -262,7 +353,8 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
             "skill_name": ONCALL_SKILL, "skill_sha256": skill_sha, "skill_item_id": skill_item["id"],
         }
     observation.pop("history_available", None)
-    return publish(db, service, observation, report, session_id, turn_id, evidence, message, incident, active)
+    return publish(db, service, observation, report, session_id, turn_id, evidence, message, incident,
+                   active if auto_recover else None)
 
 
 def show_checkpoint(record, session_id, items):
@@ -277,27 +369,129 @@ def show(value):
 
 
 def run(state, db, sessions, options, interval, sample, rounds, oncall, *,
-        environment_state=None, skill_file=None, capture_session=False, services=SERVICES, langfuse=False):
+        environment_state=None, skill_file=None, capture_session=False, services=SERVICES, langfuse=False,
+        fleet=False, page_oncall=False, oncall_steps=None):
     skill_sha = install_oncall_skill(state, skill_file) if oncall else None
+    patrol_skill_sha = install_oncall_skill(state, name=PATROL_SKILL)
+    environment_state = environment_state or state
+    route_alert = oncall_steps.route_alert if oncall_steps else steer_oncall
+    handoff = (dict(branch_report=oncall_steps.branch_report, notify=oncall_steps.notify_operator)
+               if oncall_steps else {})
     order = sorted(dict.fromkeys(services), key=lambda service: (checkpoint(db, service) or {}).get("id", 0))
     round_number = 0
     while rounds is None or round_number < rounds:
         selected = order[:sample]
-        with writer_lock(state):
-            for service in selected:
-                try:
-                    show(inspect_service(
-                        sessions, db, service, environment_state or state, options, skill_sha,
-                        capture_session=capture_session, langfuse=langfuse,
-                    ))
-                except (RuntimeError, OSError, ValueError, KeyError, TypeError) as exc:
-                    if rounds is not None:
-                        raise RuntimeError(f"{service}: {exc}") from exc
-                    print(f"{service}: {exc}", file=sys.stderr, flush=True)
+        for service in selected:
+            try:
+                if page_oncall:
+                    page_pending_incident(state, db, sessions, service, environment_state, options, langfuse, **handoff)
+                with writer_lock(state):
+                    if fleet:
+                        record = inspect_fleet_service(state, sessions, db, service, environment_state,
+                                                       options, langfuse, patrol_skill_sha)
+                    else:
+                        record = inspect_service(
+                            sessions, db, service, environment_state, options, skill_sha,
+                            patrol_skill_sha=patrol_skill_sha, capture_session=capture_session, langfuse=langfuse,
+                            auto_recover=not page_oncall, route_alert=route_alert,
+                        )
+                    if record is not None:
+                        show(record)
+                    if page_oncall:
+                        check_paged_recovery(state, db, service, record)
+                if page_oncall and "incident_id" in record:
+                    page_pending_incident(state, db, sessions, service, environment_state, options, langfuse, **handoff)
+            except (RuntimeError, OSError, ValueError, KeyError, TypeError) as exc:
+                if rounds is not None:
+                    raise RuntimeError(f"{service}: {exc}") from exc
+                print(f"{service}: {exc}", file=sys.stderr, flush=True)
         order = order[sample:] + selected
         round_number += 1
         if rounds is None or round_number < rounds:
             time.sleep(interval)
+
+
+def page_pending_incident(state, db, sessions, service, environment_state, options, langfuse, *,
+                          branch_report=fork, notify=None):
+    from investigation import investigate, page_operator
+
+    active = next((record for record in incidents(db, service) if record["recovered_inspection_id"] is None), None)
+    if active is None:
+        return
+    inbox = state / "pages" / active["incident_id"]
+    page_path = inbox / "page.json"
+    if page_path.is_file():
+        return
+    current = get_snapshot(environment_state, service)
+    if current["environment_id"] != json.loads(active["observation"])["environment_id"]:
+        return
+    inbox.mkdir(parents=True, exist_ok=True)
+    report_path = inbox / "investigation.json"
+    if report_path.is_file():
+        report = load_json(report_path)
+    else:
+        report = investigate(state, environment_state, active, options, langfuse=langfuse, sessions=sessions,
+                             branch_report=branch_report)
+        write_json(report_path, report)
+    scope = f"{report['environment_id']}/{service}"
+    (notify or page_operator)(page_path, "lab-oncall-operator", scope, report, report_path.name)
+
+
+def link_recovery(db, incident_id, inspection_id):
+    with db:
+        return db.execute("""UPDATE incidents SET recovered_inspection_id = ?
+            WHERE incident_id = ? AND recovered_inspection_id IS NULL""", (inspection_id, incident_id)).rowcount == 1
+
+
+def check_paged_recovery(state, db, service, record):
+    if record["status"] != "healthy":
+        return
+    active = next((item for item in incidents(db, service) if item["recovered_inspection_id"] is None), None)
+    if active is None:
+        return
+    page_path = state / "pages" / active["incident_id"] / "page.json"
+    if not page_path.is_file():
+        return
+    page = load_json(page_path)
+    snapshot = json.loads(record["observation"])
+    if (snapshot["error_rate"] != 0 or snapshot["environment_id"] != page["report"]["environment_id"]
+            or snapshot["window_start"] <= page["paged_at"]):
+        return
+    prior = db.execute("""SELECT 1 FROM inspections WHERE service = ? AND environment = ? AND region = ?
+        AND status = 'healthy' AND checked_at < ? AND json_extract(observation, '$.window_start') > ?
+        AND json_extract(observation, '$.error_rate') = 0 AND json_extract(observation, '$.environment_id') = ?
+        LIMIT 1""", (*scope(service), snapshot["window_start"], page["paged_at"], snapshot["environment_id"])).fetchone()
+    if prior:
+        link_recovery(db, active["incident_id"], record["id"])
+
+
+def inspect_fleet_service(state, sessions, db, service, environment_state, options, langfuse, patrol_skill_sha):
+    try:
+        dispatch = load_json(state / "dispatch.json")
+    except FileNotFoundError:
+        dispatch = None
+    if dispatch:
+        directory = Path(dispatch["directory"])
+        incident_path = directory / "detected.json"
+        if incident_path.is_file():
+            if not (directory / "page.json").is_file():
+                return None
+        elif (service == dispatch["service"] and (alert := read_alert(environment_state, service))
+              and alert["emitted_at"] >= dispatch["armed_at"]):
+            skill_sha = install_oncall_skill(state, Path(dispatch["skill"]))
+            if skill_sha != dispatch["skill_sha256"]:
+                raise RuntimeError("Fleet worker received an unapproved Skill")
+            record = inspect_service(
+                sessions, db, service, environment_state, {**options, "base_url": dispatch["capture_url"]},
+                skill_sha, patrol_skill_sha=patrol_skill_sha, capture_session=True, langfuse=langfuse,
+                fresh_session=True, auto_recover=False, incoming_alert=alert,
+            )
+            if "incident_id" in record:
+                write_json(directory / "alert.json", alert)
+                write_json(incident_path, {"pid": os.getpid(), "incident_id": record["incident_id"]})
+            return record
+    return inspect_service(sessions, db, service, environment_state, options, None,
+                           patrol_skill_sha=patrol_skill_sha, auto_recover=False)
 
 
 @contextmanager
@@ -322,7 +516,7 @@ def model_connection(offline):
     return nullcontext(os.environ.get("GLM_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4")
 
 
-def main():
+def main(argv=None, *, oncall_steps=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -334,20 +528,33 @@ def main():
     runner.add_argument("--rounds", type=int, help="Exit after this many rounds for a smoke test")
     runner.add_argument("--offline", action="store_true", help="Use a local scripted model for wiring tests")
     runner.add_argument("--oncall", action="store_true", help="Steer the active agent into On-call on abnormal metrics")
+    runner.add_argument("--page-oncall", action="store_true", help="Investigate, page the local operator and continue patrol")
     runner.add_argument("--environment-state", type=Path, help="Use a separately started lab environment")
     runner.add_argument("--skill-file", type=Path, help="Use a pinned On-call Skill for this patrol run")
     runner.add_argument("--capture-url", help="SkillClaw Client Proxy endpoint for this instance")
     runner.add_argument("--langfuse", action="store_true", help="Send native traces to the configured Langfuse project")
+    runner.add_argument("--fleet-worker", action="store_true", help=argparse.SUPPRESS)
+    status = commands.add_parser("status", help="Read lab readiness, saved patrol checkpoints and last incidents")
+    status.add_argument("--environment-state", type=Path, help="Inspect a separately started lab environment")
     for command in ("history", "resume", "fork", "incidents"):
         commands.add_parser(command).add_argument("service", choices=SERVICES)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "run" and (
         not math.isfinite(args.interval) or args.interval < 0
         or (args.rounds is None and args.interval <= 0)
         or (args.rounds is not None and args.rounds < 1)
     ):
         parser.error("Use a positive interval for continuous patrol and a positive round count for tests")
+    if args.command == "run" and args.fleet_worker and (
+            args.rounds is not None or args.oncall or args.page_oncall or args.capture_url or args.environment_state is None):
+        parser.error("Fleet workers use a continuous schedule and a separate environment")
+    if args.command == "run" and args.page_oncall and not args.oncall:
+        parser.error("--page-oncall requires --oncall")
     state = args.state.resolve()
+    if args.command == "status":
+        result = read_status(state, (args.environment_state or state).resolve())
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return
     state.mkdir(parents=True, exist_ok=True)
     with closing(connect(state)) as db:
         if args.command in ("history", "incidents"):
@@ -375,6 +582,7 @@ def main():
                     environment_state=environment_state, skill_file=args.skill_file,
                     capture_session=bool(args.capture_url),
                     services=args.services or SERVICES, langfuse=args.langfuse,
+                    fleet=args.fleet_worker, page_oncall=args.page_oncall, oncall_steps=oncall_steps,
                 )
             return
         with writer_lock(state), open_sessions(state) as sessions:

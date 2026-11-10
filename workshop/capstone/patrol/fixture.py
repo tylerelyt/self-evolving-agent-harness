@@ -18,7 +18,8 @@ def respond_followup(scope, current):
     report.update(probe_http_statuses=probes, root_cause="unknown")
     name, content = current[0]
     skill = json.loads(content)
-    if name != "skill_view" or not skill.get("success") or not skill.get("sha256"):
+    if (name != "skill_view" or not skill.get("success") or not skill.get("sha256")
+            or "## 事故补查与值班交接" not in skill.get("content", "")):
         return None, {**report, "error": "The follow-up Skill could not be read"}
 
     for name, content in current[1:]:
@@ -37,6 +38,11 @@ def respond_followup(scope, current):
         return None, {**report, "error": "The follow-up requires exactly three probes"}
     failures = sum(status >= 500 for status in probes)
     report["assessment"] = "persistent" if failures == 3 else "intermittent" if failures else "not_reproduced"
+    report["analysis"] = f"{scope['service']} 的三次探测有 {failures} 次 5xx，只能判断当前故障表现，根因未知。"
+    report["recovery_plan"] = {
+        "action": "clear_lab_fault" if failures else "observe", "approval_required": bool(failures),
+        "verification": "two_clean_windows" if failures else "continue_patrol",
+    }
     return None, report
 
 
@@ -67,6 +73,10 @@ def respond(messages):
         for line in content[end:].splitlines():
             if line.startswith("ONCALL_ALERT "):
                 alert = json.loads(line.removeprefix("ONCALL_ALERT "))
+    if "patrol_skill_view" not in results:
+        return "patrol_skill_view", {}
+    if not results["patrol_skill_view"].get("success"):
+        return None, {"status": "unavailable", "history_id": None, "summary": "巡检 Skill 无法读取。"}
     if "service_snapshot" not in results:
         return "service_snapshot", {}
     observation = results["service_snapshot"]

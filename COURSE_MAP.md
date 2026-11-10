@@ -30,4 +30,4 @@
 
 环境准备见 [README](README.md) 与 [scripts/setup_deps.sh](scripts/setup_deps.sh)。运行状态和前置条件以各讲说明为准。
 
-[综合实践 · 跑完一次学习循环，再决定下一次采用什么](workshop/practice/README.md)使用独立的支付状态查询案例，练习评分器校准、新旧方法的成对比较和版本采用决策。
+综合一讲把持续巡检、故障处理、多实例 Skill 演化和下一轮采用连成一套值守系统。 [On-call 大作业](workshop/capstone/README.md)

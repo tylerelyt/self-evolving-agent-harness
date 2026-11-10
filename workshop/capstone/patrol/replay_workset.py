@@ -11,10 +11,10 @@ import re
 import sqlite3
 from threading import Lock
 
-from environment import SERVICES, classify, write_json
+from environment import SERVICES, alert_event, classify, write_json
 from export_workset import LIVE_HTTP, SCHEMA, USAGE, scoped_snapshot
 from fleet_eval import read_receipts
-from hermes_runtime import ensure_loopback_no_proxy, install_oncall_skill, open_sessions
+from hermes_runtime import PATROL_SKILL, ensure_loopback_no_proxy, install_oncall_skill, open_sessions
 from patrol import connect, inspect_service, model_connection
 
 
@@ -79,11 +79,14 @@ def run_replay(state, skill, options, snapshot, statuses):
                 "path": "/work", "http_status": status}
 
     skill_sha = install_oncall_skill(state, skill)
+    patrol_sha = install_oncall_skill(state, name=PATROL_SKILL)
     result = {"skill_sha256": skill_sha, "status": "incomplete_replay", "trace_verified": False}
     with closing(connect(state)) as db, open_sessions(state) as sessions:
         try:
             record = inspect_service(sessions, db, snapshot["service"], state, options, skill_sha,
-                                     snapshot=lambda _state, _service: snapshot, probe_request=probe)
+                                     patrol_skill_sha=patrol_sha,
+                                     snapshot=lambda _state, _service: snapshot, probe_request=probe,
+                                     incoming_alert=alert_event(snapshot, emitted_at=snapshot["window_end"]))
             result.update(session_id=record["session_id"], report_item_id=record["report_item_id"],
                           evidence_item_id=record["evidence_item_id"], replay_incident_id=record.get("incident_id"))
             verified_skill, probes, report = read_receipts(sessions, record, skill_sha)

@@ -16,15 +16,16 @@ import time
 from urllib.error import URLError
 from uuid import uuid4
 
-from environment import classify, get_snapshot, write_json
-from hermes_runtime import ONCALL_SKILL, ensure_loopback_no_proxy
-from patrol import connect, decode_report, incidents, model_connection
+from environment import ALERT_SOURCE, classify, get_snapshot, inject_fault, load_json, read_alert, write_json
+from hermes_runtime import ONCALL_SKILL, PATROL_SKILL, ensure_loopback_no_proxy
+from patrol import checkpoint, connect, decode_report, incidents, link_recovery, model_connection, writer_lock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 from incident_runtime import IncidentRuntime
 
 SEED = HERE / "skills" / ONCALL_SKILL / "SKILL.md"
+PATROL_SEED = HERE / "skills" / PATROL_SKILL / "SKILL.md"
 GROUP = "patrol-learning"
 APPROVER = "lab-oncall-approver"
 TARGETS = {"instance-a": "payments", "instance-b": "orders"}
@@ -77,11 +78,8 @@ def wait_for_metrics(environments, predicate, timeout=45):
 def set_faults(environments, modes, *, cleanup):
     injected = {}
     for alias, state in environments.items():
-        flag = state / f"{TARGETS[alias]}.fault"
         injected[alias] = time.time()
-        with flag.open("x", encoding="utf-8") as fault:
-            cleanup.callback(flag.unlink, missing_ok=True)
-            fault.write("" if modes[alias] == "on" else "intermittent")
+        inject_fault(state, TARGETS[alias], modes[alias], cleanup=cleanup)
     return injected
 
 
@@ -93,10 +91,8 @@ def start_enterprise_faults(path, index, environments, healthy, faults, *, clean
     for alias, state in environments.items():
         peer = next(other for other in environments if other != alias)
         decoy = TARGETS[peer]
-        flag = state / f"{decoy}.fault"
         decoy_time = time.time()
-        flag.touch(exist_ok=False)
-        cleanup.callback(flag.unlink, missing_ok=True)
+        inject_fault(state, decoy, "on", cleanup=cleanup)
         service = TARGETS[alias]
         targets[alias] = {
             "service": service, "root_service": TRACE_DEPENDENCIES[service],
@@ -187,11 +183,14 @@ def clear_lab_fault(state, service, environment_id):
             "already_clear": already_clear, "cleared_at": time.time()}
 
 
-def recover(iteration, environments, proofs):
+def recover(iteration, environments, proofs, workers):
     """Authorize fixture recovery, then prove it with two disjoint HTTP windows."""
+    from investigation import page_operator
+
     runtime = IncidentRuntime(iteration / "incidents.sqlite3")
     scopes = {}
     lower_bounds = {}
+    pages = {}
 
     def healthy_window(alias, observation):
         return (observation["source"] == "live_lab_http_requests"
@@ -215,11 +214,8 @@ def recover(iteration, environments, proofs):
                     or investigation["service"] != service or investigation["source_session_id"] != record["session_id"]
                     or investigation["session_id"] == record["session_id"]
                     or investigation["source_report_item_id"] != record["report_item_id"]
-                    or investigation["skill_sha256"] != record["skill_sha256"]
-                    or investigation["report"]["assessment"] not in ("persistent", "intermittent")):
-                raise RuntimeError(f"{alias}: follow-up evidence does not support scoped recovery")
-            if classify(scoped_observation(state, service, environment_id)) != "abnormal":
-                raise RuntimeError(f"{alias}: the investigated fault is no longer present")
+                    or investigation["skill_sha256"] != record["skill_sha256"]):
+                raise RuntimeError(f"{alias}: follow-up evidence does not belong to the incident")
             scope = f"{alias}/{environment_id}/{service}"
             scopes[alias] = incident, scope, environment_id
             runtime.observe(
@@ -230,7 +226,23 @@ def recover(iteration, environments, proofs):
             runtime.start(incident, record["skill_sha256"])
             operation = f"{incident}-clear-fault"
             evidence = f"collection/{alias}/investigation.json"
-            runtime.request_action(incident, operation, evidence, action="clear_lab_fault")
+            plan = investigation["report"]["recovery_plan"]
+            if plan["approval_required"]:
+                runtime.request_action(incident, operation, evidence, action=plan["action"])
+            runtime.handoff(incident, APPROVER, [operation] if plan["approval_required"] else [])
+            pages[alias] = page_operator(iteration / "collection" / alias / "page.json", APPROVER,
+                                         scope, investigation, evidence)
+
+        resumed = wait_for_patrols(workers, lambda alias, state: newer_checkpoint(
+            state, TARGETS[alias], pages[alias]["paged_at"], scopes[alias][2],
+        ))
+        for alias, state in environments.items():
+            incident, scope, environment_id = scopes[alias]
+            service = TARGETS[alias]
+            if (not pages[alias]["report"]["recovery_plan"]["approval_required"]
+                    or classify(scoped_observation(state, service, environment_id)) != "abnormal"):
+                raise RuntimeError(f"{alias}: the paged incident has no current fault eligible for lab recovery")
+            operation = f"{incident}-clear-fault"
             runtime.approve(incident, operation, scope, APPROVER)
             receipt = runtime.execute(
                 incident, operation, scope, apply=lambda: clear_lab_fault(state, service, environment_id),
@@ -248,7 +260,7 @@ def recover(iteration, environments, proofs):
                 lower_bounds[alias] = window["window_end"]
         for incident, _, _ in scopes.values():
             runtime.close(incident, APPROVER)
-        return windows
+        return windows, resumed
     finally:
         write_json(iteration / "incident-lifecycle.json", runtime.report())
 
@@ -281,8 +293,95 @@ def receipt(state, incident):
     return {"incident": incident, "report": report, "skill": skill, "probes": probes}
 
 
+def wait_for_patrols(workers, read, timeout=180):
+    deadline = time.monotonic() + timeout
+    results = {}
+    while time.monotonic() < deadline:
+        for alias, (state, child) in workers.items():
+            if child.poll() is not None:
+                raise RuntimeError(f"Patrol {alias} stopped. Read {state / 'patrol.log'}")
+            if alias not in results and (value := read(alias, state)) is not None:
+                results[alias] = value
+        if results.keys() == workers.keys():
+            return results
+        time.sleep(0.25)
+    raise RuntimeError(f"Timed out waiting for patrols: {', '.join(workers.keys() - results.keys())}")
+
+
+def newer_checkpoint(state, service, after, environment_id, *, healthy=False):
+    if not (state / "patrol.sqlite").is_file():
+        return None
+    with closing(connect(state, readonly=True)) as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name = 'checkpoints'").fetchone() is None:
+            return None
+        record = checkpoint(db, service)
+    if record is None or record["checked_at"] <= after:
+        return None
+    observation = json.loads(record["observation"])
+    if observation["environment_id"] != environment_id:
+        return None
+    if healthy and (record["status"] != "healthy" or observation["error_rate"] != 0):
+        return None
+    return record
+
+
+def start_patrols(root, environments, stack, live, *, scoped, langfuse):
+    workers = {}
+    for alias, environment in environments.items():
+        state = root / "patrols" / alias
+        state.mkdir(parents=True)
+        args = ["run", "--fleet-worker", "--interval", "1", "--environment-state", str(environment)]
+        if not live:
+            args.append("--offline")
+        if scoped:
+            args.extend(("--service", TARGETS[alias]))
+        if langfuse:
+            args.append("--langfuse")
+        workers[alias] = state, stack.enter_context(process("patrol.py", state, state / "patrol.log", *args))
+    return workers
+
+
+def collect_patrols(root, environments, workers, receivers, skill_hash, options, inject):
+    from skillclaw_bridge import capture
+
+    root.mkdir()
+    with ExitStack() as stack:
+        dispatches = {}
+        for alias, (state, _) in workers.items():
+            directory = root / alias
+            directory.mkdir()
+            skill = receivers[alias] / ONCALL_SKILL / "SKILL.md"
+            if sha256(skill) != skill_hash:
+                raise RuntimeError(f"{alias} did not receive the approved Skill")
+            proxy = stack.enter_context(capture(root, alias, receivers[alias], options["base_url"],
+                                                options["api_key"], options["model"], group_id=GROUP))
+            dispatches[state] = {"directory": str(directory), "service": TARGETS[alias], "armed_at": time.time(),
+                                 "skill": str(skill), "skill_sha256": skill_hash, "capture_url": proxy}
+        injected_at = inject()
+        wait_for_metrics(environments, lambda alias, value: value["window_end"] >= injected_at[alias]
+                         and value["requests"] >= 25 and classify(value) == "abnormal")
+        for state, dispatch in dispatches.items():
+            write_json(state / "dispatch.json", dispatch)
+
+        def detected(alias, _state):
+            path = root / alias / "detected.json"
+            return load_json(path) if path.is_file() else None
+
+        detections = wait_for_patrols(workers, detected)
+    records = {}
+    for alias, (state, child) in workers.items():
+        with closing(connect(state, readonly=True)) as db:
+            record = next((item for item in incidents(db, TARGETS[alias])
+                           if item["incident_id"] == detections[alias]["incident_id"]), None)
+        if (record is None or record["skill_sha256"] != skill_hash or detections[alias]["pid"] != child.pid
+                or json.loads(record["observation"])["window_end"] < injected_at[alias]):
+            raise RuntimeError(f"{alias}: the running patrol did not record the injected fault with the pinned Skill")
+        records[alias] = state, record
+    return (*archive_patrols(root, records, skill_hash), injected_at)
+
+
 def patrol_round(root, environments, receivers, skill_hash, options, live, *, scoped=False, langfuse=False):
-    from skillclaw_bridge import capture, incident_archive
+    from skillclaw_bridge import capture
 
     root.mkdir()
     work = {}
@@ -319,18 +418,26 @@ def patrol_round(root, environments, receivers, skill_hash, options, live, *, sc
         for alias, child in children.items():
             if child.wait(timeout=180) != 0:
                 raise RuntimeError(f"Patrol {alias} failed. Read {work[alias] / 'patrol.log'}")
-    proofs, sources = {}, []
+    records = {}
     for alias, state in work.items():
         with closing(connect(state)) as db:
-            records = incidents(db, TARGETS[alias])
-        if len(records) != 1 or records[0]["skill_sha256"] != skill_hash:
+            found = incidents(db, TARGETS[alias])
+        if len(found) != 1 or found[0]["skill_sha256"] != skill_hash:
             raise RuntimeError(f"{alias} did not complete exactly one investigation with the pinned Skill")
-        record = records[0]
+        records[alias] = state, found[0]
+    return archive_patrols(root, records, skill_hash)
+
+
+def archive_patrols(root, records, skill_hash):
+    from skillclaw_bridge import incident_archive
+
+    proofs, sources = {}, []
+    for alias, (state, record) in records.items():
         path = incident_archive(
             root, alias, record["session_id"], group_id=GROUP,
             incident_id=record["incident_id"], skill_sha256=skill_hash,
         )
-        retained = state / "session.json"
+        retained = root / alias / "session.json"
         shutil.copyfile(path, retained)
         proofs[alias] = {**receipt(state, record), "archive": str(retained.relative_to(root))}
         sources.append(retained)
@@ -338,7 +445,7 @@ def patrol_round(root, environments, receivers, skill_hash, options, live, *, sc
     return proofs, sources
 
 
-def investigate_round(root, environments, proofs, live, *, langfuse=False):
+def investigate_round(root, environments, proofs, workers, live, *, langfuse=False):
     with ExitStack() as stack:
         children = {}
         for alias, environment_state in environments.items():
@@ -353,7 +460,7 @@ def investigate_round(root, environments, proofs, live, *, langfuse=False):
             if langfuse:
                 args.append("--langfuse")
             children[alias] = stack.enter_context(process(
-                "investigation.py", state, state / "investigation.log", *args,
+                "investigation.py", workers[alias][0], state / "investigation.log", *args,
             ))
         for alias, child in children.items():
             state = root / alias
@@ -361,6 +468,26 @@ def investigate_round(root, environments, proofs, live, *, langfuse=False):
                 raise RuntimeError(f"Follow-up {alias} failed. Read {state / 'investigation.log'}")
             proofs[alias]["investigation"] = json.loads((state / "investigation.json").read_text(encoding="utf-8"))
     write_json(root / "patrol-evidence.json", proofs)
+
+
+def finish_patrols(root, workers, proofs, recovered):
+    healthy = wait_for_patrols(workers, lambda alias, state: newer_checkpoint(
+        state, TARGETS[alias], recovered[alias]["window_end"], recovered[alias]["environment_id"], healthy=True,
+    ))
+    for alias, (state, _) in workers.items():
+        incident = proofs[alias]["incident"]["incident_id"]
+        directory = root / alias
+        with writer_lock(state), closing(connect(state)) as db:
+            if not link_recovery(db, incident, healthy[alias]["id"]):
+                raise RuntimeError(f"{alias}: unable to link the closed incident to the patrol checkpoint")
+            with closing(sqlite3.connect(directory / "patrol.sqlite")) as saved:
+                db.backup(saved)
+            (directory / "hermes").mkdir()
+            with (closing(sqlite3.connect(state / "hermes/state.db")) as sessions,
+                  closing(sqlite3.connect(directory / "hermes/state.db")) as saved):
+                sessions.backup(saved)
+        (state / "dispatch.json").unlink()
+    return healthy
 
 
 def review_facts(iteration, proofs, recovered, shared, live, *, openviking=None):
@@ -614,6 +741,8 @@ def run_rollback_rehearsal(root, report, environments, receivers, recovered, opt
                 obs["environment_id"] == recovered[alias]["environment_id"]
                 and obs["window_end"] >= injected[alias]
                 and obs["requests"] >= 25 and obs["error_rate"] >= 0.05
+                and (alert := read_alert(environments[alias], TARGETS[alias])) is not None
+                and alert["emitted_at"] >= injected[alias]
             ))
             drill = root / "rollback-rehearsal"
             proofs, _ = patrol_round(drill, environments, receivers, seed_sha, options, live, scoped=True)
@@ -660,6 +789,8 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
     formal = root / "formal"
     shared = root / "shared-facts.sqlite3"
     report = {"mode": "live" if live else "local-script-model", "status": "running", "rounds": []}
+    report["alert_source"] = ALERT_SOURCE
+    report["patrol_skill_sha256"] = sha256(PATROL_SEED)
     viking = {"namespace": "capstone-" + uuid4().hex, "runbooks": {}} if openviking else None
     if viking is not None:
         report["openviking"] = viking
@@ -695,8 +826,11 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
                     args.extend(("--trace-service", TARGETS[alias]))
                 stack.enter_context(process("environment.py", state, state / "environment.log", *args))
             report["healthy_baseline"] = wait_for_metrics(
-                environments, lambda _alias, value: classify(value) == "healthy" and value["error_rate"] == 0,
+                environments, lambda _alias, value: value["requests"] >= 25
+                and classify(value) == "healthy" and value["error_rate"] == 0,
             )
+            workers = start_patrols(root, environments, stack, live, scoped=enterprise, langfuse=langfuse)
+            report["patrol_workers"] = {alias: child.pid for alias, (_, child) in workers.items()}
             for index, faults in enumerate(FAULTS, start=1):
                 iteration = root / f"round-{index}"
                 iteration.mkdir()
@@ -709,25 +843,27 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
                     step(f"Round {index}: verify a diagnostic route migration, revise Memory and adopt it in a fresh session")
                     route_revision = revise_diagnostic_memory(iteration, environments["instance-a"],
                                                              prior_facts["instance-a"]["evidence"], live)
-                step(f"Round {index}: start faults and capture both Hermes patrols")
+                ready = wait_for_patrols(workers, lambda alias, state: newer_checkpoint(
+                    state, TARGETS[alias], report["healthy_baseline"][alias]["window_end"],
+                    report["healthy_baseline"][alias]["environment_id"], healthy=True,
+                ))
+                step(f"Round {index}: inject faults while both Hermes patrols are running")
                 enterprise_round = root / "enterprise" / f"round-{index}"
-                if enterprise:
+
+                def inject():
+                    if not enterprise:
+                        return set_faults(environments, faults, cleanup=stack)
                     plan = start_enterprise_faults(
                         enterprise_round, index, environments, report["healthy_baseline"], faults, cleanup=stack,
                     )
-                else:
-                    set_faults(environments, faults, cleanup=stack)
-                wait_for_metrics(
-                    environments, lambda _alias, value: value["requests"] >= 25 and value["error_rate"] >= 0.05,
-                )
-                proof, sources = patrol_round(
-                    iteration / "collection", environments, receivers, sha256(baseline), options, live,
-                    scoped=enterprise, langfuse=langfuse,
+                    return {alias: target["injected_at"] for alias, target in plan["targets"].items()}
+
+                proof, sources, injected_at = collect_patrols(
+                    iteration / "collection", environments, workers, receivers, sha256(baseline), options, inject,
                 )
                 adoption_verified = previous is not None
                 if adoption_verified:
                     verify_adoption(proof, faults)
-                    previous = None
                 before = sha256(baseline)
                 result = {
                     "round": index, "active_sha256": before, "decision": "pending",
@@ -743,14 +879,15 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
                 report["rounds"].append(result)
                 write_json(report_path, report)
                 step(f"Round {index}: fork both saved reports and collect scoped follow-up evidence")
-                investigate_round(iteration / "collection", environments, proof, live, langfuse=langfuse)
+                investigate_round(iteration / "collection", environments, proof, workers, live, langfuse=langfuse)
                 if enterprise:
+                    plan = load_json(enterprise_round / "fault-plan.json")
                     step(f"Round {index}: freeze live dependency spans, logs and metrics before clearing faults")
                     capture(enterprise_round, plan, environments, proof)
                     result["enterprise_capture"] = str((enterprise_round / "capture.json").relative_to(root))
                     distractors_before = capture_distractors(plan, environments)
-                step(f"Round {index}: approve lab recovery and verify two independent HTTP windows")
-                recovered = recover(iteration, environments, proof)
+                step(f"Round {index}: page the on-call operator, resume patrol and verify approved recovery")
+                recovered, resumed = recover(iteration, environments, proof, workers)
                 write_json(iteration / "recovery.json", recovered)
                 result["recovery"] = str((iteration / "recovery.json").relative_to(root))
                 if enterprise:
@@ -764,6 +901,13 @@ def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, op
                                      capture_distractors(plan, environments))
                     for alias, state in environments.items():
                         (state / f"{plan['targets'][alias]['decoy_service']}.fault").unlink()
+                healthy = finish_patrols(iteration / "collection", workers, proof, recovered)
+                loop_path = iteration / "patrol-loop.json"
+                write_json(loop_path, {alias: {"before": ready[alias], "injected_at": injected_at[alias],
+                                              "resumed": resumed[alias], "recovered": healthy[alias]}
+                                       for alias in workers})
+                result["patrol_loop"] = str(loop_path.relative_to(root))
+                previous = None
                 write_json(report_path, report)
                 step(f"Round {index}: review completed incident evidence in isolated Hermes workers")
                 prior_facts = review_facts(iteration, proof, recovered, shared, live,

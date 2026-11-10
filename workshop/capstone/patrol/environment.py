@@ -30,6 +30,7 @@ MAX_TELEMETRY_ROWS = 2048
 DIAGNOSTIC_V1 = "/diagnostics/v1"
 DIAGNOSTIC_V2 = "/diagnostics/v2"
 DIAGNOSTIC_SOURCE = "live_lab_http_diagnostics"
+ALERT_SOURCE = "lab-alert-monitor"
 
 
 def write_json(path, value):
@@ -48,6 +49,34 @@ def classify(observation):
 
 def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def alert_event(observation, *, emitted_at=None):
+    service = observation["service"]
+    return {"incident_id": f"lab-{service}-{uuid.uuid4().hex[:12]}", "service": service,
+            "environment_id": observation["environment_id"], "source": ALERT_SOURCE,
+            "emitted_at": time.time() if emitted_at is None else emitted_at}
+
+
+def read_alert(state, service):
+    try:
+        return load_json(state / f"{service}.alert.json")
+    except FileNotFoundError:
+        return None
+
+
+def inject_fault(state, service, mode, *, cleanup=None):
+    flag = state / f"{service}.fault"
+    if mode == "off":
+        flag.unlink(missing_ok=True)
+        return
+    content = "intermittent" if mode == "intermittent" else ""
+    if cleanup is None:
+        flag.write_text(content, encoding="utf-8")
+    else:
+        with flag.open("x", encoding="utf-8") as fault:
+            cleanup.callback(flag.unlink, missing_ok=True)
+            fault.write(content)
 
 
 def service_address(state, service):
@@ -347,6 +376,31 @@ def traffic(url, interval, stop):
         stop.wait(interval)
 
 
+def monitor_alerts(state, stop):
+    """Simulate the external log monitor with one event per injected fault."""
+    emitted = {}
+    while not stop.wait(.25):
+        for service in SERVICES:
+            flag = state / f"{service}.fault"
+            try:
+                marker = flag.stat()
+            except FileNotFoundError:
+                emitted.pop(service, None)
+                continue
+            key = marker.st_ino, marker.st_mtime_ns
+            if emitted.get(service) == key:
+                continue
+            try:
+                observation = get_snapshot(state, service)
+                current = flag.stat()
+                if observation["error_rate"] and (current.st_ino, current.st_mtime_ns) == key:
+                    write_json(state / f"{service}.alert.json", alert_event(observation))
+                    emitted[service] = key
+            except (OSError, RuntimeError, ValueError, KeyError):
+                # A fault can disappear between the metric read and delivery.
+                continue
+
+
 def serve(state, trace_service=None, *, shared_root=False):
     routes = trace_routes(trace_service, shared_root)
     with ExitStack() as stack:
@@ -383,6 +437,9 @@ def serve(state, trace_service=None, *, shared_root=False):
                 worker.start()
                 workers.append(worker)
             write_json(manifest, endpoints)
+            monitor = threading.Thread(target=monitor_alerts, args=(state, stop), daemon=True)
+            monitor.start()
+            workers.append(monitor)
             print(json.dumps(endpoints), flush=True)
             stop.wait()
         finally:
@@ -411,11 +468,7 @@ def main():
         print(json.dumps(get_snapshot(state, args.service)))
     else:
         load_json(state / "environment.json")[args.service]
-        path = state / f"{args.service}.fault"
-        if args.mode == "off":
-            path.unlink(missing_ok=True)
-        else:
-            path.write_text("" if args.mode == "on" else "intermittent")
+        inject_fault(state, args.service, args.mode)
 
 
 if __name__ == "__main__":
