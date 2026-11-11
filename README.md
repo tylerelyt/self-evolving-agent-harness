@@ -10,7 +10,8 @@
 | --- | --- | --- |
 | 看一次评分器校准和版本采用决定 | [支付查询短练习](workshop/practice/README.md) | Python 3.12，无需密钥 |
 | 按课学习 Agent 的执行过程 | [第 1 讲 Notebook](#从第-1-讲开始) | Python 3.12、Notebook 依赖。运行真实模型时需要 GLM 密钥 |
-| 在工作台逐步接入巡检、调查、Memory 和 Skill 学习 | [On-call 综合实战](workshop/capstone/README.md#启动本地工作台) | 固定版本的 Hermes 和 SkillClaw，默认模式无需密钥 |
+| 复现支付与订单的两轮巡检、演化和采用 | [On-call 双实例演练](workshop/capstone/README.md#运行双实例演练) | 固定版本的 Hermes 和 SkillClaw，默认脚本模型无需密钥 |
+| 从业务工作台逐步搭建并观察同一套系统 | [On-call 业务工作台](workshop/capstone/README.md#启动本地工作台) | 同上；默认实时对话需要 GLM 密钥，`--offline` 可核对接线 |
 
 在仓库根目录运行下面的命令，可先用构造订单对照两版方法的评分。终端会打印保留或采用的决定，以及本轮记录的目录。
 
@@ -30,7 +31,7 @@ python3.12 workshop/practice/replay.py --judge calibrated
 | 判断新方法是否改善业务表现，又是否损害原有能力 | [18 业务评测](examples/18-business-eval/) |
 | 把真实经历整理成可重跑的题，再搜索更好的方法 | [19 企业数据集](examples/19-enterprise-dataset/) · [20 GEPA 离线优化](examples/20-gepa-offline-optimization/) |
 | 汇集多个实例的经历，让共同方法到达下一次任务 | [21 SkillClaw 收集与蒸馏](examples/21-skillclaw-session-collection/) · [22 验证发布与分发](examples/22-skillclaw-shared-revision/) |
-| 从持续巡检跑到候选评测、版本采用与恢复 | [23 双实例 On-call 大作业](workshop/capstone/README.md) |
+| 从持续巡检跑到候选评测、版本采用与恢复 | [23 双实例 On-call 综合实战](workshop/capstone/README.md) |
 | 用固定订单成对比较两版方法，依据评分决定是否切换 | [支付查询短练习](workshop/practice/README.md) |
 
 完整讲次见[课程与代码对照](COURSE_MAP.md)。第 10 讲在正文中安排 Hermes 手动观察题，记录一次任务留下的 Memory、Skill 和新会话中的使用情况。
@@ -39,7 +40,7 @@ python3.12 workshop/practice/replay.py --judge calibrated
 
 ## 开始运行
 
-准备 Git、Bash 和 Python 3.12。练习使用构造的业务材料。运行真实模型的练习时，按各讲说明配置智谱 `GLM_API_KEY`，模型调用会产生 API 费用。各讲的离线检查和第 23 讲默认双实例演练无需模型密钥。
+准备 Git、Bash 和 Python 3.12。练习使用构造的业务材料。运行真实模型的练习时，按各讲说明配置智谱 `GLM_API_KEY`，模型调用会产生 API 费用。各讲的离线检查和命令行双实例演练无需模型密钥。综合实战的业务工作台默认连接真实模型，也可显式使用 `--offline` 检查接线。
 
 ### 从第 1 讲开始
 
@@ -99,15 +100,15 @@ bash examples/21-skillclaw-session-collection/run.sh \
 
 默认直接发布；希望先做原生客户端验证时，在第21讲启动命令中加 `--publish-mode validated`。两种结果都可以按第22讲继续，不必重跑采集。第22讲观察原生周期同步和新Session的实际使用，并把客户端文本验证与业务工具检查分开记录，不能用文件同步成功代替能力检查。全部操作使用练习自己的共享组和目录，不改个人Hermes或SkillClaw配置。
 
-### 运行第 23 讲大作业与综合实践
+### 运行 On-call 综合实战
 
-第 23 讲的双实例演练从持续巡检和检查点起步，注入模拟故障，再把真实 Hermes 工具回执和原生 SkillClaw 归档送进候选评测、发布与采用验证。默认使用脚本模型。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲大作业](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
+先按[运行双实例演练](workshop/capstone/README.md#运行双实例演练)复现本讲主线。两个 Hermes 持续巡检独立的本地 HTTP 环境，第一轮由 A 的支付服务和 B 的订单服务分别经历持续与间歇失败，第二轮交换故障类型。原始初判会话进入 SkillClaw，补查分支用于处置与复盘；候选经过独立冻结三用例的新旧成对评测，再发布并验证新现场采用或回退。`self_improvement_agent.py` 的受控两轮入口默认使用脚本模型，无需模型密钥。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲综合实战](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
 
-综合一讲提供本地 On-call 工作台。先运行两套业务环境，再由 Coding Agent 逐关补全同一份 `self_improvement_agent.py`，检查通过后回面板应用代码、注入故障、追问报告，并观察 Memory 与 Skill 的后续使用。[打开工作台](workshop/capstone/README.md#启动本地工作台) · [四关实作](workshop/capstone/lab/README.md)
+业务工作台是这套系统新增的操作与观察入口，共用原有 Skill、巡检和演化主链。先查看服务指标、日志和变更，再向 Coding Agent 提出自然需求，逐步补全同一份练习代码并自动检查。SRE 对话帮助核对事故与版本证据，四步练习的目标仍是搭建上述双实例自进化系统。工作台默认实时对话与受控双轮的脚本模型验收分别运行。[打开工作台](workshop/capstone/README.md#启动本地工作台) · [逐步实作](workshop/capstone/lab/README.md)
 
 ## 运行离线检查
 
-在仓库根目录执行 `python3.12 -B scripts/check_offline.py`。这组检查只用 Python 标准库、Git 和 Bash，覆盖安装、会话证据、Memory 修订、业务评分和大作业的本地 HTTP 边界。GitHub Actions 使用同一入口在 Linux 和 macOS 上检查变更。真实 Hermes 和模型运行按各讲的命令单独验收。 [工作流定义](.github/workflows/course-checks.yml)
+在仓库根目录执行 `python3.12 -B scripts/check_offline.py`。这组检查只用 Python 标准库、Git 和 Bash，覆盖安装、会话证据、Memory 修订、业务评分和综合实战的本地 HTTP 边界。GitHub Actions 使用同一入口在 Linux 和 macOS 上检查变更。真实 Hermes 和模型运行按各讲的命令单独验收。 [工作流定义](.github/workflows/course-checks.yml)
 
 ## 许可证
 

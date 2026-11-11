@@ -30,10 +30,49 @@ def dump(value):
 
 
 def decode_report(content):
+    """Read one model-authored report, retaining its original SessionDB Item.
+
+    Real models sometimes wrap the requested object in a Markdown explanation.
+    Accept one explicit JSON fence, or one standalone object at the end, as
+    presentation only. Multiple reports, invalid JSON or non-object values stay
+    failures; evidence validation follows.
+    """
+    if not isinstance(content, str):
+        raise ValueError("The final report must contain one JSON object")
     text = content.strip()
-    if text.startswith("```") and text.endswith("```") and "\n" in text:
-        text = text.split("\n", 1)[1][:-3].strip()
-    return json.loads(text)
+    try:
+        report = json.loads(text)
+    except json.JSONDecodeError as original:
+        blocks = re.findall(r"^[ \t]*```(?:json)?[ \t]*\r?\n(.*?)^[ \t]*```[ \t]*\r?$",
+                            text, flags=re.MULTILINE | re.DOTALL | re.IGNORECASE)
+        if len(blocks) > 1:
+            raise ValueError("The final report must contain one unambiguous JSON object") from original
+        if blocks:
+            try:
+                report = json.loads(blocks[0].strip())
+            except json.JSONDecodeError as exc:
+                raise ValueError("The final report contains invalid JSON") from exc
+        else:
+            # A common live-model format is one sentence, then the report on its
+            # own line. Do not search inline prose, choose among objects, infer
+            # fields or repair broken JSON. Skip nested objects within a candidate.
+            candidates = []
+            decoder = json.JSONDecoder()
+            for start in re.finditer(r"^[ \t]*(?=\{)", text, flags=re.MULTILINE):
+                if candidates and start.end() < candidates[-1][1]:
+                    continue
+                try:
+                    candidate, end = decoder.raw_decode(text, start.end())
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate, dict):
+                    candidates.append((candidate, end))
+            if len(candidates) != 1 or text[candidates[0][1]:].strip():
+                raise ValueError("The final report must contain one unambiguous JSON object") from original
+            report = candidates[0][0]
+    if not isinstance(report, dict):
+        raise ValueError("The final report must be a JSON object")
+    return report
 
 def connect(state, *, readonly=False):
     path = state / "patrol.sqlite"
@@ -218,7 +257,12 @@ def publish(db, service, observation, report, session_id, turn_id, evidence, mes
 
 def steer_oncall(steer, alert):
     return steer(f"{STEER_PREFIX}{dump(alert)}\n"
-                 f"用 skill_view 读取 {ONCALL_SKILL}，执行其中的告警初判任务。")
+                 f"用 skill_view 读取 {ONCALL_SKILL}，执行其中的告警初判任务。"
+                 "保留本轮巡检的 status、history_id、summary。status 和 summary 只依据本轮 service_snapshot，"
+                 "error_rate 是 0—1 的比率，1.0 表示 100%；旧巡检只供历史对照。"
+                 "初判报告必须有 incident_id、probe_http_status（首次实际探测的整数状态码）、"
+                 "probe_http_statuses（按顺序的完整探测数组）和 assessment，两种探测字段都要保留。"
+                 "最终只输出一个 JSON 对象，不要 Markdown 或额外说明。")
 
 
 def inspect_service(sessions, db, service, state, options, skill_sha, *,
@@ -311,9 +355,12 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
     if skill_sha:
         tools.update(skill_view=load_skill, oncall_probe=probe)
         prompt += "只有收到本轮 Hermes steer 的 ONCALL_ALERT 才进入 On-call 调查。"
+    prompt += ("status 和 summary 只依据本轮 service_snapshot 的当前窗口，error_rate 是 0—1 比率，"
+               "1.0 表示 100%，历史读数只供对照。最终只输出 Skill 要求的一个 JSON 报告对象，"
+               "不要 Markdown 或额外说明。")
     rows, transcript = run_turn(
         sessions, session_id, prompt, tools, options, deliver_alert if skill_sha else None,
-        capture_session=capture_session, task_id=turn_id if langfuse else None, max_iterations=7,
+        capture_session=capture_session, task_id=turn_id if langfuse else None, max_iterations=12,
     )
     calls = {call["id"]: call["function"]["name"] for row in rows for call in row.get("tool_calls") or []}
     evidence = next((row for row in reversed(rows)

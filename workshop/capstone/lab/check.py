@@ -29,6 +29,7 @@ from implementation import load_implementation
 from patrol import (STEER_PREFIX, check_paged_recovery, connect, incidents, inspect_service,
                     model_connection, page_pending_incident)
 from stages import STAGES, read_patrol_config
+from workbench_config import load_model_environment
 
 
 SERVICE = "payments"
@@ -185,8 +186,9 @@ def scheduled_patrol(root, implementation, live):
                    "--stage", "1", "--rounds", "2"]
         if live:
             command.append("--live")
+        allowance = 180 if live else 30
         worker = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT,
-                                timeout=max(30, config["interval"] + 30))
+                                timeout=max(allowance, config["interval"] + allowance))
         require(worker.returncode == 0, "Stage 1 巡检进程失败，查看 patrol.log")
     with closing(connect(state, readonly=True)) as db:
         records = [dict(row) for row in db.execute("SELECT * FROM inspections ORDER BY id")]
@@ -297,6 +299,7 @@ def main():
     parser.add_argument("--solution", action="store_true", help="运行结课工程提供的参考实现")
     parser.add_argument("--implementation", type=Path, default=LAB / "self_improvement_agent.py")
     parser.add_argument("--live", action="store_true", help="使用已配置的真实模型端点")
+    parser.add_argument("--env-file", type=Path, help="读取本地模型配置，默认使用 repo 的 .env")
     destination = parser.add_mutually_exclusive_group()
     destination.add_argument("--out", type=Path, help="本次记录使用的独立新目录")
     destination.add_argument("--workbench", type=Path, help="把验收证据保存到运行中工作台的 checks 目录")
@@ -320,6 +323,8 @@ def main():
               "part": args.part, "mode": "live" if args.live else "local-script-model",
               "implementation": {"path": str(source)}, "checks": [], "evidence": [], "started_at": time.time()}
     try:
+        if args.live:
+            load_model_environment(args.env_file)
         report["implementation"]["sha256"] = sha256(source.read_bytes()).hexdigest()
         implementation = load_implementation(source) if args.part != 0 else None
         ensure_loopback_no_proxy()

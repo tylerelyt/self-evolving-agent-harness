@@ -203,7 +203,7 @@ def read_oncall_skill(expected_sha, *, name=ONCALL_SKILL):
 
 
 def run_turn(db, session_id, prompt, tools, options, on_tool_complete=None, *,
-             capture_session=False, load_memory=False, skill_name=ONCALL_SKILL, task_id=None, max_iterations=6):
+             capture_session=False, load_memory=False, skill_name=ONCALL_SKILL, task_id=None, max_iterations=12):
     from hermes_cli.plugins import clear_thread_tool_whitelist, set_thread_tool_whitelist
     from run_agent import AIAgent
     from tools.registry import registry
@@ -260,6 +260,8 @@ def run_turn(db, session_id, prompt, tools, options, on_tool_complete=None, *,
         **options, provider="custom", api_mode="chat_completions",
         session_id=session_id, session_db=db, enabled_toolsets=["course_patrol"],
         max_iterations=max_iterations, max_tokens=2048, quiet_mode=True, skip_context_files=True,
+        ephemeral_system_prompt=("最终报告格式：仅返回任务要求的一个完整 JSON 对象。"
+                                 "不要在 JSON 前后附加解释，不要使用 Markdown 代码围栏。"),
         load_soul_identity=False, skip_memory=not load_memory, save_trajectories=False,
         request_overrides=request_overrides,
     )

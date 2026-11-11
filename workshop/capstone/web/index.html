@@ -1,257 +1,389 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>On-call 工作台 · 自进化 Agent 实战</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>On-call · 服务现场</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23264038'/%3E%3Cpath d='M5 18h5l3-8 5 14 3-6h6' fill='none' stroke='%23d2e7b8' stroke-width='2'/%3E%3C/svg%3E">
   <style>
-    :root { --ink:#203b35; --muted:#6d7d77; --green:#167b65; --paper:#f6f7f3; --line:#dce3dc; --amber:#a75629; --red:#b44a40; }
-    * { box-sizing:border-box; }
-    body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
-    button,input,select,textarea { font:inherit; }
-    button { cursor:pointer; border:1px solid var(--line); color:var(--ink); background:white; border-radius:7px; padding:8px 13px; }
-    button:hover { border-color:var(--green); }
-    button:disabled { opacity:.45; cursor:default; }
-    button.primary { background:var(--green); color:white; border-color:var(--green); }
-    button.small { padding:4px 9px; font-size:12px; }
-    header { background:white; border-bottom:1px solid var(--line); padding:20px 32px; display:flex; justify-content:space-between; align-items:center; gap:20px; }
-    .eyebrow { color:var(--green); font-size:11px; font-weight:700; letter-spacing:1.4px; }
-    h1 { font-size:24px; margin:3px 0 0; letter-spacing:-.4px; }
-    h2 { margin:0; font-size:19px; } h3 { margin:0 0 12px; font-size:15px; }
-    p { margin:8px 0; } .muted { color:var(--muted); } .tiny { font-size:12px; }
-    .header-meta { display:flex; gap:12px; align-items:center; }
-    .badge { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:5px; background:#eef1eb; font-size:12px; white-space:nowrap; }
-    .badge.good { color:#12674e; background:#e5f2e9; } .badge.warn { color:var(--amber); background:#fcf0df; } .badge.bad { color:var(--red); background:#fae9e5; }
-    .shell { display:grid; grid-template-columns:255px minmax(0,1fr); max-width:1660px; margin:auto; min-height:calc(100vh - 92px); }
-    aside { border-right:1px solid var(--line); padding:28px 20px; }
-    .stage { display:block; width:100%; padding:13px 12px; text-align:left; margin:9px 0; background:transparent; border-color:transparent; }
-    .stage.active { background:white; border-color:#a4c8b6; box-shadow:0 3px 12px #203b3506; }
-    .stage-num { color:var(--green); font-size:11px; font-weight:700; }
-    .stage-name { font-weight:650; margin:3px 0 7px; line-height:1.5; }
-    .side-note { margin-top:27px; border-top:1px solid var(--line); padding-top:18px; }
-    main { min-width:0; padding:26px 30px 40px; }
-    .control { background:white; border:1px solid var(--line); border-radius:10px; padding:19px 22px; }
-    .control-top { display:flex; gap:16px; justify-content:space-between; align-items:center; }
-    .buttons { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .code-path { font:12px/1.6 ui-monospace,SFMono-Regular,monospace; color:var(--muted); word-break:break-all; margin-top:12px; }
-    .guide { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:center; margin-top:16px; border-top:1px solid var(--line); padding-top:14px; }
-    #guide-text { margin:0; }
-    .tabs { display:flex; gap:25px; border-bottom:1px solid var(--line); margin:24px 0 20px; }
-    .tab { border:0; border-radius:0; padding:9px 0 12px; background:transparent; color:var(--muted); }
-    .tab.active { border-bottom:2px solid var(--green); color:var(--green); font-weight:650; }
-    .page[hidden] { display:none; }
-    .section-head { display:flex; align-items:center; gap:15px; justify-content:space-between; margin-bottom:14px; }
-    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
-    .stat { background:white; border:1px solid var(--line); border-radius:9px; padding:15px 18px; }
-    .stat strong { display:block; font-size:26px; font-weight:650; line-height:1.4; margin-top:4px; }
-    .instances { display:grid; grid-template-columns:1fr 1fr; gap:17px; }
-    .card { background:white; border:1px solid var(--line); border-radius:10px; padding:19px 21px; min-width:0; }
-    .service { padding:13px 0; border-top:1px solid #edf0e9; }
-    .service-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .service-name { font-weight:650; }
-    .metrics { display:grid; grid-template-columns:1fr 1fr 1fr 90px; align-items:end; margin:8px 0; gap:8px; }
-    .metric-label { font-size:11px; color:var(--muted); }
-    .metric-value { font-size:17px; }
-    .spark { width:85px; height:32px; }
-    .fault-actions { display:flex; gap:5px; margin-top:9px; }
-    .fault-actions button { font-size:11px; padding:3px 7px; }
-    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .feed { margin-top:20px; }
-    .event { display:flex; gap:13px; border-top:1px solid #edf0e9; padding:8px 0; }
-    .event time { color:var(--muted); min-width:67px; font-variant-numeric:tabular-nums; font-size:12px; }
-    .empty { color:var(--muted); padding:25px 0; }
-    .split { display:grid; grid-template-columns:280px minmax(0,1fr); gap:16px; }
-    .incident { width:100%; text-align:left; margin:0 0 8px; padding:13px; }
-    .incident.selected { border-color:var(--green); background:#eff6f0; }
-    .incident .tiny { overflow-wrap:anywhere; }
-    .timeline { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0; }
-    .timeline span { border:1px solid var(--line); border-radius:6px; padding:5px 9px; font-size:12px; }
-    .timeline .done { color:var(--green); background:#f0f7f0; border-color:#c8dfce; }
-    pre { white-space:pre-wrap; word-break:break-word; font:12px/1.65 ui-monospace,SFMono-Regular,monospace; background:#f5f7f2; border:1px solid #e6eae2; border-radius:6px; padding:12px; overflow:auto; max-height:400px; }
-    .session-grid { margin-top:18px; }
-    .message { border-top:1px solid var(--line); padding:13px 0; }
-    .message-label { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--green); font-weight:700; }
-    .report { white-space:pre-wrap; }
-    .probes { display:flex; gap:7px; align-items:center; margin:12px 0; }
-    .probe { background:#f8eadf; color:var(--amber); border-radius:6px; padding:4px 12px; font-weight:700; }
-    textarea { width:100%; min-height:76px; border:1px solid var(--line); border-radius:7px; padding:10px; resize:vertical; background:white; color:var(--ink); }
-    .question-box { margin-top:20px; border-top:1px solid var(--line); padding-top:16px; }
-    .memory-card { margin-top:12px; }
-    .evaluation { border-collapse:collapse; width:100%; margin:12px 0; }
-    .evaluation th,.evaluation td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
-    .evaluation th { font-size:12px; color:var(--muted); }
-    details { margin-top:12px; } summary { cursor:pointer; color:var(--muted); }
-    #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#203b35; color:white; padding:11px 20px; border-radius:8px; box-shadow:0 5px 22px #0002; z-index:5; display:none; max-width:75vw; }
-    #connection { font-size:12px; color:var(--muted); }
-    @media(max-width:1080px) { header{padding:18px 22px}.shell{grid-template-columns:220px 1fr}main{padding:22px 20px}.instances{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr 1fr 90px}.control-top{align-items:flex-start;flex-direction:column} }
-    @media(max-width:720px) { .shell{display:block}aside{padding:16px;border-right:0;border-bottom:1px solid var(--line)}#stages{display:grid;grid-template-columns:1fr 1fr;gap:5px}.stage{margin:0;padding:8px}.side-note{display:none}.header-meta{flex-direction:column;align-items:flex-end;gap:3px}header{padding:14px}main{padding:18px 14px}.guide{grid-template-columns:1fr}.tabs{gap:16px}.stats{gap:8px} }
+    :root{--ink:#253d36;--muted:#79847d;--paper:#f6f7f3;--white:#fff;--line:#e1e6de;--green:#23765d;--pale:#edf4eb;--amber:#a56831;--red:#b65444;--shadow:0 9px 36px #233e3510}
+    *{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font:13px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer;border:1px solid var(--line);background:white;border-radius:7px;padding:7px 12px;transition:border-color .15s}button:hover{border-color:#83ab91}button:disabled{opacity:.45;cursor:default}button.primary{color:white;background:var(--green);border-color:var(--green)}button.quiet{border-color:transparent;background:transparent}button.small{font-size:11px;padding:4px 8px}button:focus-visible,a:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid #72aa89;outline-offset:2px}input,select,textarea{border:1px solid var(--line);border-radius:6px;background:white}input,select{padding:7px 9px;max-width:100%}textarea{resize:vertical;padding:11px;line-height:1.7}h1,h2,h3,h4,p{margin:0}h1{font-size:20px;letter-spacing:-.4px}h2{font-size:22px;letter-spacing:-.4px;font-weight:650}h3{font-size:14px;font-weight:650}h4{font-size:12px;font-weight:650}p+p{margin-top:8px}svg{display:block}.muted{color:var(--muted)}.tiny{font-size:11px}.mono{font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.buttons{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.badge{display:inline-flex;align-items:center;padding:2px 7px;background:#eff1ec;color:#727c73;border-radius:4px;font-size:10px;white-space:nowrap}.badge.good{background:#e8f2e6;color:#347153}.badge.warn{background:#faf0e2;color:var(--amber)}.badge.bad{background:#f9e9e4;color:var(--red)}.dot{width:7px;height:7px;border-radius:50%;display:inline-block;background:#9ea9a1}.dot.good{background:#5a9472}.dot.bad{background:#c77359}.dot.warn{background:#b69a5b}.empty{padding:24px 5px;color:var(--muted);font-size:12px}.eyebrow{text-transform:uppercase;letter-spacing:1.6px;font-size:9px;font-weight:700;color:var(--muted)}
+    .topbar{height:72px;border-bottom:1px solid var(--line);background:var(--white);display:flex;align-items:center;justify-content:space-between;padding:0 27px;gap:15px}.brand{display:flex;gap:11px;align-items:center}.brand-mark{display:grid;place-items:center;width:32px;height:32px;background:#294339;border-radius:8px}.brand-mark svg{width:23px;height:23px}.brand small{font-size:10px;display:block;color:var(--muted);letter-spacing:.9px}.top-meta{display:flex;gap:13px;align-items:center}.layout{display:grid;grid-template-columns:164px minmax(0,1fr);min-height:calc(100vh - 72px);max-width:1800px;margin:auto}.sidebar{border-right:1px solid var(--line);padding:25px 15px;display:flex;flex-direction:column;gap:6px}.nav{border:0;background:transparent;display:flex;gap:11px;align-items:center;text-align:left;padding:10px 13px;color:#69776d;border-radius:6px}.nav.active{background:#e8efe4;color:#305a43;font-weight:650}.nav-icon{width:18px;text-align:center;font:17px/1 Georgia,serif}.nav-heading{font-size:9px;letter-spacing:1.2px;color:#929a91;margin:12px 13px 6px}.sidebar-foot{margin-top:auto;padding:26px 12px 0;font-size:10px;color:#8a9389}.workspace{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(350px,.88fr);gap:22px;padding:26px 25px;align-items:start;min-width:0}.business{min-width:0}.page-head{margin-bottom:22px}.page-head .row{align-items:flex-start}.page-head p{margin-top:5px;color:var(--muted);font-size:11px}.scope-filters{display:flex;gap:7px;margin-top:15px}.scope-filters select{font-size:11px;background:#fff;padding:5px 8px}.page[hidden]{display:none}.card{background:white;border:1px solid var(--line);border-radius:9px;padding:18px;min-width:0;margin-bottom:15px}.card-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-bottom:17px}.stat{border:1px solid var(--line);background:white;border-radius:8px;padding:14px 16px}.stat-label{color:var(--muted);font-size:10px;display:flex;align-items:center;gap:7px}.stat-value{font-size:28px;line-height:1.4;margin-top:6px;letter-spacing:-.8px;font-weight:600}.stat-unit{font-size:11px;font-weight:400;color:var(--muted);margin-left:4px}.stat-note{font-size:10px;color:var(--muted);margin-top:2px}.alert-banner{display:flex;gap:10px;align-items:center;background:#fcf0e7;border:1px solid #f0d9c6;color:#95633b;padding:11px 13px;border-radius:7px;margin-bottom:16px}.alert-banner.clear{background:#eef4eb;border-color:#dfe9d9;color:#52754c}.service-table,.data-table,.eval-table{width:100%;border-collapse:collapse;text-align:left;font-size:11px}.service-table th,.data-table th,.eval-table th{font-weight:500;color:var(--muted);font-size:10px;padding:0 7px 9px 0;border-bottom:1px solid var(--line)}.service-table td,.data-table td,.eval-table td{padding:10px 7px 10px 0;border-bottom:1px solid #edf0e9;vertical-align:top}.service-table tr:last-child td,.data-table tr:last-child td,.eval-table tr:last-child td{border-bottom:0}.service-link{padding:0;background:none;border:0;text-align:left;font-size:11px;font-weight:600}.instance-name{font-size:9px;color:var(--muted);margin-top:2px}.service-status{display:flex;gap:5px;align-items:center}.pill-line{display:flex;gap:6px;flex-wrap:wrap}.incident-card{border-top:1px solid #edf0e9;padding:12px 0}.incident-card:first-child{border-top:0;padding-top:0}.incident-card:last-child{padding-bottom:0}.incident-open{border:0;background:none;padding:0;text-align:left;flex:1}.incident-summary{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:11px;color:var(--muted);margin-top:3px;line-height:1.7}.incident-id{font-size:9px;color:#98a095;overflow-wrap:anywhere}.detail-body{border-top:1px solid var(--line);margin-top:12px;padding-top:12px;font-size:12px;white-space:pre-wrap}.timeline{display:flex;gap:5px;flex-wrap:wrap;margin:11px 0}.timeline span{font-size:9px;color:#8b968b;border:1px solid var(--line);padding:3px 6px;border-radius:4px}.timeline span.done{color:#4c7957;border-color:#d3e3ce;background:#f0f6ed}.probes{display:flex;gap:5px;align-items:center;margin:10px 0}.probe{background:#f6eadf;color:#9b6b3c;padding:2px 8px;border-radius:4px;font-size:11px}.metric-grid{display:grid;gap:12px}.metric-chart .row{margin-bottom:11px}.chart{width:100%;height:96px}.chart-legend{display:flex;justify-content:space-between;font-size:9px;color:#9aa293;margin-top:4px}.log-filters{display:flex;gap:6px;margin-bottom:12px;align-items:center}.log-filters input{min-width:0;flex:1;font-size:11px}.log-filters select{font-size:11px;padding:7px}.log-row{padding:10px 0;border-top:1px solid #edf0e9}.log-row:first-child{border-top:0}.log-meta{display:flex;gap:8px;align-items:center;font-size:9px;color:var(--muted)}.log-content{font:11px/1.6 ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere;margin-top:4px}.change{padding:13px 0;border-top:1px solid #edf0e9}.change:first-child{border-top:0;padding-top:0}.change:last-child{padding-bottom:0}.change-title{font-size:12px;font-weight:600}.change-description{font-size:11px;color:var(--muted);white-space:pre-wrap;margin-top:4px}.fact{font-size:12px}.fact .buttons{margin-top:10px}.fact p{margin-top:7px}.release-hash{font:17px/1.6 ui-monospace,SFMono-Regular,monospace;margin:6px 0}.adoptions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.adoption{border:1px solid #d6e5cf;color:#4f7757;background:#f0f6ed;padding:6px 9px;font-size:10px;border-radius:4px}.event{display:flex;gap:11px;padding:8px 0;border-top:1px solid #edf0e9;font-size:11px}.event:first-child{border-top:0}.event time{font-size:9px;color:var(--muted);min-width:53px}.page-note{font-size:10px;color:#939b90;margin-top:10px}.metric-sub{font-size:10px;color:var(--muted);margin-top:5px}
+    .agent-panel{position:sticky;top:20px;border:1px solid #d8e0d3;background:#fff;border-radius:10px;box-shadow:var(--shadow);min-width:0;display:flex;flex-direction:column;max-height:calc(100vh - 40px);min-height:630px;overflow:hidden}.agent-head{flex-shrink:0;padding:17px 18px 13px;border-bottom:1px solid var(--line)}.agent-label{display:flex;gap:8px;align-items:center}.agent-label h2{font-size:15px;letter-spacing:0}.agent-orb{width:24px;height:24px;display:grid;place-items:center;background:#e8f0e1;border-radius:6px;color:#587b43;font-size:13px}.agent-model{font-size:9px;color:var(--muted);margin:6px 0 0 32px}.new-chat{font-size:11px;padding:4px 8px}.chat-session{display:flex;gap:7px;margin-top:12px}.chat-session select{flex:1;min-width:0;font-size:10px;padding:5px 7px;color:#71806d}.chat-context{font-size:9px;color:#909b8b;margin-top:7px}.chat-body{padding:0 18px;overflow-y:auto;min-height:140px;flex:1;scrollbar-width:thin}.chat-empty{padding:40px 8px 30px;text-align:center}.chat-empty h3{font-size:14px;margin:12px 0 8px}.chat-empty p{color:#8a9485;font-size:11px;max-width:270px;margin:0 auto 15px}.suggestions{display:flex;flex-direction:column;gap:7px;align-items:stretch;margin:0 3px}.suggestion{font-size:11px;text-align:left;padding:9px 11px;background:#fafbf8;color:#718267;border-color:#e8ede3;line-height:1.65}.chat-message{padding:17px 0;border-bottom:1px solid #edf0e9;overflow-wrap:anywhere}.chat-message:last-child{border-bottom:0}.chat-message.user{margin:14px 0 4px;padding:11px 13px;border:0;background:#f1f4ed;border-radius:7px}.chat-message .speaker{font-size:9px;letter-spacing:.5px;color:#8a9781;margin-bottom:7px;display:flex;gap:8px;align-items:center}.chat-message.user .speaker{display:none}.chat-text{font-size:12px;line-height:1.85;white-space:normal;overflow-wrap:anywhere}.chat-text code{font-size:11px;background:#eef2e8;border-radius:3px;padding:1px 4px}.chat-text strong{font-weight:650}.tool-chips{display:flex;gap:5px;flex-wrap:wrap;margin:7px 0}.tool-chip{font:9px/1.7 ui-monospace,SFMono-Regular,monospace;color:#71836a;background:#f2f5ed;border:1px solid #e4eadc;border-radius:4px;padding:2px 6px}.trace{font-size:10px}.trace summary{color:#7f8f74;cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px}.trace summary:before{content:'›';font-size:14px}.trace[open] summary:before{transform:rotate(90deg)}.trace pre{font-size:10px;max-height:190px}.chat-pending{font-size:11px;color:#7f9472;padding:12px 0;display:flex;align-items:center;gap:7px}.pulse{width:6px;height:6px;background:#85a36d;border-radius:50%;animation:pulse 1.5s infinite}.chat-error{background:#fbefeb;color:#a45b4d;border-radius:6px;font-size:11px;padding:10px 12px;margin:12px 0;white-space:pre-wrap}.thread-area{padding:0 18px;max-height:165px;overflow-y:auto;flex-shrink:0}.thread-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:10px 0 7px}.thread-card{border:1px solid #e2e9db;background:#fbfcf8;border-radius:6px;padding:9px;min-width:0}.thread-card h4{font-size:10px;overflow-wrap:anywhere}.thread-card p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:9px;color:#87967d;margin-top:5px;line-height:1.6;overflow-wrap:anywhere}.thread-title{font-size:9px;letter-spacing:.5px;color:#81946f;margin-top:10px}.composer{flex-shrink:0;padding:12px 14px 14px;border-top:1px solid var(--line);background:#fcfdf9}.composer textarea{width:100%;min-height:72px;max-height:170px;resize:vertical;background:white;border-color:#dfe6d7;font-size:12px}.composer-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px}.composer-hint{font-size:9px;color:#9aa38f}.composer button{font-size:11px;padding:6px 15px}.connection-error{font-size:10px;color:#b76b57;display:none;margin:10px 0}.agent-foot{flex-shrink:0;padding:0 18px 10px;font-size:9px;color:#97a08f}.offline-action{margin:9px 0 12px}
+    dialog{border:1px solid var(--line);border-radius:10px;color:var(--ink);box-shadow:0 20px 70px #1d332a2a;padding:0;max-width:calc(100vw - 30px)}dialog::backdrop{background:#25392d35;backdrop-filter:blur(2px)}.drawer{position:fixed;inset:0 0 0 auto;margin:0;width:470px;height:100dvh;max-height:100dvh;border-radius:0;border-width:0 0 0 1px;overflow-y:auto;background:#f8f9f5}.drawer-head{position:sticky;top:0;background:#f8f9f5;border-bottom:1px solid var(--line);padding:20px 21px;z-index:1}.drawer-head h2{font-size:17px}.drawer-body{padding:20px 21px}.drawer-section{margin-bottom:24px}.drawer-section h3{margin-bottom:10px}.drawer-status{margin-bottom:13px}.steps{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:13px 0}.step{padding:11px;font-size:11px;text-align:left;background:#fff}.step.active{border-color:#95b286;background:#f0f6e9}.step .row{gap:4px;align-items:flex-start}.step small{display:block;color:#9ba48f;font-size:9px;margin-top:6px}.guide-text{color:#76856b;font-size:12px;line-height:1.8;margin:14px 0}.setup-code{margin-top:12px;font-size:10px;overflow-wrap:anywhere;color:#98a08f}.fault-selectors{display:flex;gap:7px;margin:10px 0}.fault-selectors select{flex:1;min-width:0;font-size:11px}.fault-buttons{display:flex;gap:6px;flex-wrap:wrap}.fault-buttons button{font-size:10px;padding:5px 8px}.check-record{border-top:1px solid var(--line);padding:12px 0}.check-record:first-child{border:0}.evidence-dialog{width:880px;max-height:85vh}.modal-head{padding:15px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:white;z-index:1}.modal-head h2{font-size:14px}.modal-body{padding:10px 20px 20px}.modal-message{padding:13px 0;border-bottom:1px solid var(--line)}.modal-message .mono{color:#859878}.modal-message p{white-space:pre-wrap;font-size:12px}.modal-message pre{max-height:300px}pre{white-space:pre-wrap;word-break:break-word;overflow:auto;border:1px solid #e3e9dc;border-radius:5px;background:#f6f8f1;padding:10px;font:10px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;margin:8px 0 0;max-height:300px}details{margin-top:10px}summary{cursor:pointer;color:#88987a;font-size:10px}#toast{position:fixed;left:50%;bottom:25px;transform:translateX(-50%);background:#2d4736;color:#fff;border-radius:7px;padding:10px 17px;font-size:12px;box-shadow:var(--shadow);max-width:85vw;z-index:20;display:none}@keyframes pulse{50%{opacity:.3}}
+    @media(min-width:941px){.agent-panel{height:calc(100dvh - 128px);max-height:calc(100dvh - 128px);min-height:0}.agent-panel .chat-body{min-height:0}.agent-panel .thread-area{max-height:min(165px,24vh);flex-shrink:1}}
+    @media(min-width:1500px){.workspace{padding:30px 35px;gap:28px}.summary{grid-template-columns:repeat(4,minmax(0,1fr))}.stat-value{font-size:25px}}
+    @media(max-width:1120px){.layout{grid-template-columns:138px minmax(0,1fr)}.workspace{padding:21px 18px;gap:16px;grid-template-columns:minmax(0,1fr) minmax(330px,.95fr)}.sidebar{padding:20px 10px}.nav{padding:10px}.topbar{padding:0 21px}.card{padding:14px}.service-table td,.service-table th{font-size:10px}.sidebar-foot{padding:20px 8px 0}}
+    @media(max-width:940px){.workspace{grid-template-columns:minmax(0,1fr)}.agent-panel{position:static;min-height:520px;max-height:800px}.layout{grid-template-columns:145px minmax(0,1fr)}.summary{grid-template-columns:repeat(4,minmax(0,1fr))}.stat{padding:11px}.stat-value{font-size:22px}.stat-label{font-size:9px}.chat-body{max-height:450px}.top-meta #connection{display:none}}
+    @media(max-width:680px){.topbar{height:66px;padding:0 15px}.brand h1{font-size:18px}.brand small{font-size:8px}.top-meta{gap:7px}.top-meta .tiny{display:none}.top-meta button{font-size:10px;padding:6px 9px}.layout{display:block}.sidebar{border-right:0;border-bottom:1px solid var(--line);padding:8px 10px;display:flex;flex-direction:row;overflow:auto;gap:2px}.nav{white-space:nowrap;font-size:11px;padding:8px}.nav-icon{display:none}.nav-heading,.sidebar-foot{display:none}.workspace{padding:20px 13px;gap:12px}.page-head{margin-bottom:17px}.page-head h2{font-size:20px}.summary{grid-template-columns:1fr 1fr}.stat-value{font-size:25px}.card{padding:15px}.agent-panel{min-height:510px;max-height:720px}.thread-grid{grid-template-columns:1fr 1fr}.drawer{width:100%;max-width:100vw}.drawer-body{padding:18px}.drawer-head{padding:16px 18px}.service-table th:nth-child(3),.service-table td:nth-child(3){display:none}.data-table{font-size:10px}}
+    .chat-text p{margin:0 0 10px}.chat-text p:last-child{margin-bottom:0}.chat-text h1,.chat-text h2,.chat-text h3,.chat-text h4,.chat-text h5,.chat-text h6{font-size:13px;line-height:1.6;margin:15px 0 7px;letter-spacing:0}.chat-text h1{font-size:16px}.chat-text h2{font-size:14px}.chat-text :first-child{margin-top:0}.chat-text ul,.chat-text ol{padding-left:22px;margin:8px 0 12px}.chat-text li{padding-left:2px;margin:4px 0}.chat-text li ul,.chat-text li ol{margin:5px 0}.chat-text blockquote{margin:10px 0;padding:3px 12px;border-left:3px solid #c8d9bb;color:#7a8a6e}.chat-text hr{border:0;border-top:1px solid var(--line);margin:15px 0}.chat-text pre{white-space:pre-wrap;margin:9px 0 12px}.chat-text pre code{background:none;padding:0;font:inherit}.markdown-table{overflow-x:auto;max-width:100%;margin:10px 0 14px;scrollbar-width:thin}.markdown-table table{border-collapse:collapse;width:max-content;min-width:100%;font-size:11px;line-height:1.65}.markdown-table th,.markdown-table td{padding:8px 10px;min-width:70px;max-width:250px;white-space:normal;overflow-wrap:anywhere;border:1px solid #e0e7d8;vertical-align:top}.markdown-table th{background:#f1f5e9;font-weight:600;color:#657b53}.markdown-table tbody tr:nth-child(even){background:#fafbf7}
   </style>
 </head>
 <body>
-<header>
-  <div><div class="eyebrow">SELF-EVOLVING AGENT HARNESS</div><h1>On-call 工作台</h1></div>
-  <div class="header-meta"><span id="model" class="badge">连接中</span><span id="connection">等待服务现场</span></div>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 26 26"><path d="M2 15h5l3-8 5 14 3-6h6" fill="none" stroke="#d5e9ba" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h1>On-call</h1><small>SERVICE OPERATIONS</small></div></div>
+  <div class="top-meta"><span class="tiny muted">本地服务环境</span><span id="connection" class="tiny muted">连接现场…</span><button id="open-practice">练习与运行</button></div>
 </header>
-<div class="shell">
-  <aside>
-    <div class="eyebrow">搭建你的 AGENT</div>
-    <p class="muted tiny">每完成一关，回到这里观察它的变化。</p>
-    <div id="stages"></div>
-    <div class="side-note tiny muted">指标来自本机 HTTP 请求。调查、会话与学习结果来自当前运行记录。<p id="workspace"></p></div>
-  </aside>
-  <main>
-    <section class="control">
-      <div class="control-top">
-        <div><div class="row"><h2 id="agent-title">Agent 等待接入</h2><span id="agent-status" class="badge">离线</span></div><p id="agent-note" class="muted tiny">服务现场已准备好，先让巡检 Agent 上线。</p></div>
-        <div class="buttons"><button id="start" class="primary" data-action="agent_start">启动 Agent</button><button id="restart" data-action="restart">应用代码</button><button id="stop" data-action="agent_stop">停止 Agent</button></div>
-      </div>
-      <div id="code-path" class="code-path"></div>
-      <div class="guide"><p id="guide-text"></p><div class="buttons"><button id="copy-prompt">复制本关提示词</button><button id="check" class="primary">运行本关检查</button></div></div>
-      <details id="check-details"><summary>本关验收记录</summary><div id="checks"></div></details>
-    </section>
-    <nav class="tabs" aria-label="工作台分区">
-      <button class="tab active" data-tab="overview">服务现场</button><button class="tab" data-tab="incidents">事故与调查 <span id="incident-count"></span></button><button class="tab" data-tab="memory">Memory</button><button class="tab" data-tab="learning">Skill 学习</button>
-    </nav>
-    <section id="overview" class="page">
-      <div id="stats" class="stats"></div><div id="instances" class="instances"></div>
-      <div class="card feed"><h3>工作台事件</h3><div id="events"></div></div>
-    </section>
-    <section id="incidents" class="page" hidden>
-      <div class="section-head"><h2>事故与调查</h2><div class="buttons"><button id="live-incidents" class="small primary">现场事故</button><button id="check-incidents" class="small">检查样本</button></div></div>
-      <div class="split"><div id="incident-list"></div><div class="card"><div id="incident-detail" class="empty">注入一次故障，或打开一次验收产生的事故。</div>
-        <div id="question-box" class="question-box" hidden><h3>继续问 Agent</h3><textarea id="question" placeholder="为什么作出这个判断？接下来还需要哪些证据？"></textarea><div class="buttons" style="margin-top:8px"><button id="ask" class="primary">发送追问</button><span class="muted tiny">从这次初判报告打开独立会话</span></div><div id="answers"></div></div>
-      </div></div>
-      <div id="session-panel" class="card session-grid" hidden><div class="section-head"><h3 id="session-title">执行轨迹</h3><button id="close-session" class="small">收起</button></div><div id="messages"></div></div>
-      <div class="card feed"><h3>最近的会话</h3><div id="sessions"></div></div>
-    </section>
-    <section id="memory" class="page" hidden>
-      <div class="section-head"><h2>Memory</h2><button id="review-memory" class="primary">复盘已恢复事故</button></div>
-      <p class="muted">从已完成的事故保留有来源的事实。新会话先查询历史，再独立检查当前 HTTP 指标。</p><div id="memory-content"></div>
-    </section>
-    <section id="learning" class="page" hidden>
-      <div class="section-head"><h2>Skill 学习</h2><span id="learning-status" class="badge">等待接入</span></div>
-      <p class="muted">事故会话 → 候选 → 独立回放 → 发布 → 下一次实际采用</p><div id="learning-content"></div>
-    </section>
+<div class="layout">
+  <nav class="sidebar" aria-label="业务导航">
+    <div class="nav-heading">服务现场</div>
+    <button class="nav active" data-page="overview"><span class="nav-icon" aria-hidden="true">◈</span>概览</button>
+    <button class="nav" data-page="metrics"><span class="nav-icon" aria-hidden="true">≋</span>指标</button>
+    <button class="nav" data-page="logs"><span class="nav-icon" aria-hidden="true">≡</span>日志</button>
+    <button class="nav" data-page="changes"><span class="nav-icon" aria-hidden="true">↗</span>变更</button>
+    <div class="nav-heading">团队经验</div>
+    <button class="nav" data-page="memory"><span class="nav-icon" aria-hidden="true">▧</span>Memory</button>
+    <button class="nav" data-page="learning"><span class="nav-icon" aria-hidden="true">◇</span>Skill 学习</button>
+    <div class="sidebar-foot">SELF-EVOLVING<br>AGENT HARNESS</div>
+  </nav>
+  <main class="workspace">
+    <div class="business">
+      <div class="page-head"><div class="row"><div><h2 id="page-title">服务概览</h2><p id="page-description">当前服务指标、告警与调查进展</p></div><span id="live-indicator" class="badge">连接中</span></div><div class="scope-filters"><select id="instance-filter" aria-label="筛选服务环境"><option value="">全部环境</option><option value="instance-a">环境 A</option><option value="instance-b">环境 B</option></select><select id="service-filter" aria-label="筛选服务"><option value="">全部服务</option><option>orders</option><option>payments</option><option>inventory</option><option>notifications</option></select></div></div>
+      <div id="connection-error" class="connection-error" role="status"></div>
+      <section id="overview" class="page"><div id="overview-content"></div></section>
+      <section id="metrics" class="page" hidden><div id="metrics-content"></div></section>
+      <section id="logs" class="page" hidden><div class="card"><div class="card-title"><h3>请求日志</h3><span id="log-count" class="tiny muted"></span></div><div class="log-filters"><input id="log-search" type="search" placeholder="筛选日志内容…" aria-label="筛选日志内容"><select id="log-level" aria-label="筛选日志级别"><option value="">全部状态</option><option value="error">失败请求</option><option value="success">成功请求</option></select></div><div id="logs-content"></div></div></section>
+      <section id="changes" class="page" hidden><div id="changes-content"></div></section>
+      <section id="memory" class="page" hidden><div class="card-title"><h3>已验证的历史事实</h3><button id="review-memory" class="small">复盘已恢复事故</button></div><div id="memory-content"></div></section>
+      <section id="learning" class="page" hidden><div id="learning-content"></div></section>
+    </div>
+    <aside class="agent-panel" aria-label="SRE Agent 持续对话">
+      <div class="agent-head"><div class="row"><div class="agent-label"><span class="agent-orb" aria-hidden="true">✧</span><h2>SRE Agent</h2><span id="chat-status" class="badge">离线</span></div><button id="new-chat" class="new-chat" aria-label="新建对话" title="开始独立的新会话">＋ 新建对话</button></div><p id="chat-model" class="agent-model">等待接入</p><div class="chat-session"><select id="conversation-select" aria-label="切换历史对话"><option value="">暂无对话</option></select></div><p id="chat-context" class="chat-context">当前现场 · 概览 / 全部服务</p><p class="tiny muted" style="font-size:9px;margin-top:3px">应用代码后，新建会话体验新能力。</p></div>
+      <div id="chat-body" class="chat-body" aria-live="polite"><div id="chat-empty" class="chat-empty"><div class="agent-orb" style="margin:auto" aria-hidden="true">✧</div><h3>Agent 尚未接入</h3><p>服务现场已经就绪。接入 Agent 后，可以直接描述调查任务，并在这里持续追问。</p><button id="offline-action" class="small offline-action">接入 Agent</button></div><div id="chat-messages"></div><div id="chat-progress"></div><div id="chat-job-error"></div></div>
+      <div id="thread-area" class="thread-area" hidden><div class="thread-title">调查成员</div><div id="thread-grid" class="thread-grid"></div></div>
+      <form id="chat-form" class="composer"><label for="chat-question" class="eyebrow" hidden>向 SRE Agent 提问</label><textarea id="chat-question" placeholder="向 Agent 描述任务或继续追问…" aria-label="向 Agent 描述任务或继续追问" rows="3" disabled></textarea><div class="composer-foot"><span id="composer-hint" class="composer-hint">接入后即可开始调查</span><button id="chat-send" type="submit" class="primary" disabled>发送</button></div></form>
+      <div class="agent-foot">结论依据本次工具结果；历史事实会单独引用。</div>
+    </aside>
   </main>
 </div>
+<dialog id="practice-drawer" class="drawer" aria-labelledby="practice-title"><div class="drawer-head row"><h2 id="practice-title">练习与运行</h2><button class="quiet" data-close="practice-drawer" aria-label="关闭练习与运行">✕</button></div><div class="drawer-body">
+  <section class="drawer-section"><div class="row"><h3>Agent 运行</h3><span id="agent-status" class="badge">离线</span></div><p id="agent-note" class="tiny muted drawer-status"></p><div class="buttons"><button id="start" class="primary" data-action="agent_start">启动 Agent</button><button id="restart" data-action="restart">应用代码</button><button id="stop" data-action="agent_stop">停止 Agent</button></div><div id="code-path" class="setup-code mono"></div><p id="workspace" class="setup-code mono"></p></section>
+  <section class="drawer-section"><h3>接入能力</h3><p class="tiny muted">每次给 Coding Agent 一个需求，检查完成后回到业务现场。</p><div id="stages" class="steps"></div><p id="guide-text" class="guide-text"></p><div class="buttons"><button id="copy-prompt">复制本步需求</button><button id="check" class="primary">运行本步检查</button></div><details id="check-details"><summary>检查记录与证据</summary><div id="checks"></div></details></section>
+  <section class="drawer-section"><h3>场景控制</h3><p class="tiny muted">注入实验故障后，由环境监控发出告警。恢复需先完成调查交接，再明确批准执行。</p><div class="fault-selectors"><select id="fault-instance" aria-label="故障目标环境"><option value="instance-a">环境 A</option><option value="instance-b">环境 B</option></select><select id="fault-service" aria-label="故障目标服务"><option>payments</option><option>orders</option><option>inventory</option><option>notifications</option></select></div><div class="fault-buttons"><button data-inject="on">注入持续失败</button><button data-inject="intermittent">注入间歇失败</button><button id="request-recovery">申请恢复</button></div><p id="recovery-gate" class="tiny muted" style="margin-top:9px">仅可为已完成工程师交接、且恢复方案要求清除实验故障的事故申请恢复。</p></section>
+  <section class="drawer-section"><h3>运行事件</h3><div id="events"></div></section>
+</div></dialog>
+<dialog id="evidence-dialog" class="evidence-dialog" aria-labelledby="evidence-title"><div class="modal-head row"><h2 id="evidence-title">执行证据</h2><button class="quiet" data-close="evidence-dialog" aria-label="关闭执行证据">✕</button></div><div id="evidence-content" class="modal-body"></div></dialog>
+<dialog id="recovery-dialog" class="evidence-dialog" aria-labelledby="recovery-title"><div class="modal-head row"><h2 id="recovery-title">批准恢复</h2><button class="quiet" data-close="recovery-dialog" aria-label="关闭批准恢复">✕</button></div><div id="recovery-content" class="modal-body"></div><div class="row" style="padding:0 20px 20px"><span id="recovery-action-note" class="tiny muted"></span><button id="approve-recovery" class="primary">批准并执行本地恢复</button></div></dialog>
 <div id="toast" role="status"></div>
 <script>
-  let state = null;
-  let stage = 1;
-  let selectedIncident = null;
-  let detailVersion = null;
-  let busy = false;
-  let activeTab = 'overview';
-  let incidentScope = 'live';
-  function incidentRows() { return state.incidents.filter(item => item.source.startsWith('check:') === (incidentScope==='checks')); }
-  const labels = {healthy:'健康',abnormal:'异常',insufficient:'样本不足',unavailable:'不可用',offline:'离线',unimplemented:'待实现',unchecked:'待检查',completed:'已完成',recalled:'已召回',ready:'可用',empty:'暂无事实',running:'运行中',starting:'启动中',stopped:'已停止',failed:'失败',passed:'通过',pending:'等待',waiting:'等待经历',disabled:'未接入',evaluating:'评测中',published:'已发布',keep:'保留现行版',rejected:'拒绝候选',awaiting_adoption:'等待采用验证',adopted:'已采用',rolled_back:'已回退',recovered:'已恢复',handed_off:'已交接',investigating:'调查中',interrupted:'已中断',error:'异常'};
-  const prompts = ['先让巡检 Agent 上线。实现 patrol_config，定义负责的服务、每轮抽查数量和间隔。', '让 Agent 接手监控告警，从初判报告 fork 补查，page 值班工程师后继续巡检。', '让新会话用上之前的事故经验，实际读取 Memory 并检查当前现场。', '把事故经历接进 Skill 学习，用独立评测决定是否发布，再验证下一次实际采用。'];
-  const observations = ['先让巡检 Agent 上线，观察两个实例怎样轮流检查服务。','注入一次持续或间歇故障，查看初判、补查和工程师交接。','恢复一次故障后复盘，在新会话里核对历史事实和当前现场。','两端事故恢复后观察候选与评测，再注入新故障验证采用。'];
-  function $(id) { return document.getElementById(id); }
-  function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function pretty(value) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
-  function short(value) { if (!value) return '—'; value=String(value); return value.startsWith('patrol-') && value.length>24 ? value.slice(0,value.lastIndexOf('-'))+'…'+value.slice(-6) : value.slice(0,12); }
-  function time(value) { return value ? new Date(value * 1000).toLocaleTimeString('zh-CN',{hour12:false}) : '—'; }
-  function badge(value) { const tone = ['healthy','passed','adopted','recovered'].includes(value) ? 'good' : ['failed','abnormal','error'].includes(value) ? 'bad' : ['waiting','awaiting_adoption','investigating','insufficient'].includes(value) ? 'warn' : ''; return '<span class="badge '+tone+'">'+escapeHtml(labels[value] || value || '等待')+'</span>'; }
-  function toast(message) { $('toast').textContent = message; $('toast').style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').style.display = 'none', 4500); }
-  async function api(path, body) { const response = await fetch(path, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const data = await response.json(); if (!response.ok) throw new Error(data.error || '请求失败'); return data; }
-  async function action(body) { if (busy) return; busy = true; try { await api('/api/actions',body); await refresh(); } catch(error) { toast(error.message); } finally { busy = false; } }
-  function switchTab(name) { activeTab = name; document.querySelectorAll('.page').forEach(node => node.hidden = node.id !== name); document.querySelectorAll('.tab').forEach(node => node.classList.toggle('active',node.dataset.tab === name)); }
-  function sessionButton(source,id,label,item) { return '<button class="small" data-session="'+escapeHtml(id)+'" data-source="'+escapeHtml(source)+'"'+(item?' data-item="'+escapeHtml(item)+'"':'')+'>'+escapeHtml(label || short(id))+'</button>'; }
-  function spark(history) { const values = (history || []).slice(-35).map(item => Number(item.error_rate || 0)); if (values.length < 2) return ''; const points = values.map((value,i) => (i * 82/(values.length-1)).toFixed(1)+','+(28-value*26).toFixed(1)).join(' '); return '<svg class="spark" viewBox="0 0 85 32" aria-label="错误率走势"><line x1="0" y1="29" x2="85" y2="29" stroke="#dce3dc"/><polyline points="'+points+'" fill="none" stroke="'+(values.some(v=>v>0)?'#b46a36':'#167b65')+'" stroke-width="1.7"/></svg>'; }
-  function verified(number) { return (state.checks || []).some(check => check.stage >= number && check.verified); }
-  function renderControl() {
-    const agent = state.agent;
-    $('model').textContent = agent.mode === 'live' ? '真实模型' : '本地脚本模型';
-    $('agent-title').textContent = agent.status === 'offline' ? 'Agent 等待接入' : '巡检 Agent';
-    $('agent-status').outerHTML = '<span id="agent-status">'+badge(agent.status)+'</span>';
-    $('agent-note').textContent = agent.code_changed && agent.running_sha256 ? '代码已更新，点击“应用代码”在新运行中接入。' : (agent.active_stage ? '当前接入第 '+agent.active_stage+' 阶段 · 服务环境独立运行' : '服务现场已准备好，先让巡检 Agent 上线。');
-    if (agent.implementation_error) $('agent-note').textContent='代码暂时无法加载 · '+agent.implementation_error;
-    $('code-path').textContent = agent.implementation+'  ·  '+short(agent.code_sha256);
-    $('workspace').textContent = state.root;
-    $('start').disabled = ['running','starting'].includes(agent.status);
-    $('stop').disabled = !['running','starting'].includes(agent.status);
-    $('stages').innerHTML = agent.stages.map(item => '<button class="stage '+(item.number===stage?'active':'')+'" data-stage="'+item.number+'"><div class="stage-num">PART '+String(item.number).padStart(2,'0')+'</div><div class="stage-name">'+escapeHtml(item.title)+'</div>'+badge(verified(item.number)?'passed':item.implemented?'unchecked':'unimplemented')+'</button>').join('');
-    $('guide-text').textContent = observations[stage-1];
-    $('check').disabled = (state.checks || []).some(check => check.status==='running');
-    const checks = (state.checks || []).filter(check => check.stage === stage).slice(-3).reverse();
-    $('checks').innerHTML = checks.length ? checks.map(check => '<div class="row">'+badge(check.status)+'<span class="tiny muted">'+time(check.finished_at || check.started_at)+' · '+short(check.implementation_sha256)+'</span></div><pre>'+escapeHtml(check.log || (check.evidence ? pretty(check.evidence) : '正在执行实际检查…'))+'</pre>').join('') : '<p class="muted">完成本关后运行检查，结果和会话会留在工作台。</p>';
+  let state=null, page='overview', stage=1, selectedIncident=null, conversationId=null, chatData=null;
+  let refreshing=false, actionBusy=false, chatBusy=false, chatLoading=false, chatSignature='', conversationSignature='', stateRoot=null, pendingConversationId=null;
+  let recoveryRequest=null, recoveryBusy=false, recoveryError='';
+  const names={overview:['服务概览','当前服务指标、告警与调查进展'],metrics:['服务指标','比较当前窗口与最近的指标变化'],logs:['请求日志','按服务与状态查看实际 HTTP 请求'],changes:['服务变更','查看环境配置与故障状态的变更记录'],memory:['团队 Memory','保留有来源的历史事实，在新任务中核对当前现场'],learning:['Skill 学习','从事故经历到独立评测，再到下一次实际采用']};
+  const labels={healthy:'健康',awaiting_approval:'待明确批准',verifying:'恢复验证中',inconclusive:'证据不足',open:'待接手',abnormal:'异常',insufficient:'样本不足',unavailable:'不可用',offline:'离线',unimplemented:'待接入',unchecked:'待检查',completed:'已完成',recalled:'已召回',ready:'可用',empty:'暂无事实',running:'运行中',starting:'启动中',stopped:'已停止',failed:'失败',passed:'通过',pending:'等待',waiting:'等待经历',disabled:'未接入',evaluating:'评测中',published:'已发布',keep:'保留现行版',rejected:'拒绝候选',awaiting_adoption:'等待采用验证',adopted:'已采用',rolled_back:'已回退',recovered:'已恢复',handed_off:'已交接',investigating:'调查中',interrupted:'已中断',error:'异常',idle:'空闲',queued:'等待执行',success:'成功',live:'实时模型',done:'已完成'};
+  const tools={service_metrics:'查询当前指标',investigate_instances:'并行调查服务',incident_history:'读取历史事故',skill_history:'核对学习与采用',oncall_runbook:'读取获准调查方法',service_snapshot:'查询当前指标',incident_evidence:'读取事故证据',request_logs:'查询请求日志',recent_changes:'查询服务变更',memory_lookup:'检索历史事实',investigate:'委派事故调查',investigate_incident:'委派事故调查',investigate_service:'委派服务调查',list_incidents:'读取告警',list_services:'查看服务',patrol_skill_view:'读取巡检方法',skill_view:'读取调查方法',oncall_probe:'探测服务',followup_probe:'补查探测',search_inspections:'检索巡检历史'};
+  const prompts=['让 Agent 上线，持续抽查这几项服务，并把检查结果保存下来。','让 Agent 接手告警，调查故障，把结论和恢复建议交给值班工程师，然后继续巡检。','让 Agent 记住已经核实的事故经验，在新会话里查到它，并重新确认当前现场。','让多个实例的事故经历改进共享 Skill，评测通过后发布，再验证后续任务实际采用。'];
+  const observations=['接入后，在概览查看服务是否不断出现新的巡检记录。','给一个服务注入故障，再让 Agent 解释影响、证据与恢复建议。','复盘已恢复的事故，在新会话里核对历史事实和当前状态。','完成两端事故后查看候选评测，发布后用新事故验证实际采用。'];
+  const $=id=>document.getElementById(id), esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function pretty(value){return typeof value==='string'?value:JSON.stringify(value,null,2);}
+  function implementationLabel(value){
+    const parts=String(value||'').replace(/\\/g,'/').split('/');
+    const index=parts.findIndex(part=>['apps','workshop','examples'].includes(part));
+    return index>=0?parts.slice(index).join('/'):'外部实现文件';
   }
-  function renderOverview() {
-    const services = state.instances.flatMap(instance => instance.services);
-    const values = [['服务',services.length],['最近检查',services.filter(service=>service.checkpoint).length],['待处理事故',state.incidents.filter(item=>!item.source.startsWith('check:')&&item.status!=='recovered').length],['当前阶段',state.agent.active_stage || '—']];
-    $('stats').innerHTML = values.map(([label,value])=>'<div class="stat"><span class="muted tiny">'+label+'</span><strong>'+value+'</strong></div>').join('');
-    $('instances').innerHTML = state.instances.map(instance => '<article class="card"><div class="section-head"><h3>'+escapeHtml(instance.id==='instance-a'?'Hermes A':'Hermes B')+'</h3><span class="tiny muted">独立服务环境</span></div>'+instance.services.map(service => {
-      const metrics=service.metrics || {}, point=service.checkpoint;
-      return '<div class="service"><div class="service-title"><span class="service-name">'+escapeHtml(service.name)+'</span>'+badge(service.health)+'</div><div class="metrics"><div><div class="metric-label">30s 请求数</div><div class="metric-value">'+escapeHtml(metrics.requests ?? '—')+'</div></div><div><div class="metric-label">5xx 比例</div><div class="metric-value">'+(metrics.error_rate==null?'—':(metrics.error_rate*100).toFixed(1)+'%')+'</div></div><div><div class="metric-label">P95</div><div class="metric-value">'+(metrics.p95_ms==null?'—':Number(metrics.p95_ms).toFixed(0)+' ms')+'</div></div>'+spark(service.history)+'</div><div class="tiny muted">'+(point?'Agent 检查 '+time(point.checked_at)+' · '+escapeHtml(point.status==='healthy'?'健康':labels[point.status] || point.status):'尚未收到 Agent 巡检记录')+'</div><div class="fault-actions"><button data-fault="on" data-instance="'+instance.id+'" data-service="'+service.name+'">注入持续失败</button><button data-fault="intermittent" data-instance="'+instance.id+'" data-service="'+service.name+'">注入间歇失败</button><button data-fault="off" data-instance="'+instance.id+'" data-service="'+service.name+'">解除故障</button>'+(service.fault!=null?'<span class="tiny" style="color:var(--amber)">故障已注入</span>':'')+'</div></div>';
-    }).join('')+'</article>').join('');
-    $('events').innerHTML = state.events.slice(0,9).map(event=>'<div class="event"><time>'+time(event.time)+'</time><span>'+escapeHtml(event.message)+'</span></div>').join('') || '<div class="empty">等待第一个事件。</div>';
+  function short(value){if(!value)return '—';value=String(value);return value.startsWith('patrol-')&&value.length>24?value.slice(0,value.lastIndexOf('-'))+'…'+value.slice(-6):value.slice(0,12);}
+  function time(value){if(!value)return '—';const n=Number(value),date=Number.isFinite(n)?new Date(n<1e12?n*1000:n):new Date(value);return Number.isNaN(date.getTime())?'—':date.toLocaleTimeString('zh-CN',{hour12:false});}
+  function badge(value){const tone=['healthy','passed','adopted','recovered','recalled','completed','done','success'].includes(value)?'good':['failed','abnormal','error'].includes(value)?'bad':['waiting','awaiting_adoption','investigating','insufficient','running','queued','awaiting_approval','verifying','inconclusive'].includes(value)?'warn':'';return '<span class="badge '+tone+'">'+esc(labels[value]||value||'等待')+'</span>';}
+  function instanceName(value){return value==='instance-a'?'环境 A':value==='instance-b'?'环境 B':value||'—';}
+  function changeDescription(row){
+    if(row.description)return row.description;
+    const labels={on:'持续失败',off:'正常',intermittent:'间歇失败',running:'运行中',stopped:'已停止'};
+    const display=value=>value==null?(row.kind==='environment_started'?'未启动':'无记录'):(labels[value]||pretty(value));
+    return row.before!=null||row.after!=null?display(row.before)+' → '+display(row.after):'';
   }
-  function incidentKey(item) { return item.source+'|'+item.incident_id; }
-  function renderIncidents() {
-    const rows=incidentRows();
-    $('incident-count').textContent = state.incidents.filter(item=>!item.source.startsWith('check:')).length || '';
-    $('live-incidents').classList.toggle('primary',incidentScope==='live'); $('check-incidents').classList.toggle('primary',incidentScope==='checks');
-    if (!rows.some(item=>incidentKey(item)===selectedIncident)) { selectedIncident=rows.length?incidentKey(rows[0]):null; detailVersion=null; }
-    $('incident-list').innerHTML = rows.length ? rows.map(item=>'<button class="incident '+(selectedIncident===incidentKey(item)?'selected':'')+'" data-incident="'+escapeHtml(incidentKey(item))+'"><div class="row"><strong>'+escapeHtml(item.service)+'</strong>'+badge(item.status)+'</div><div class="tiny muted">'+escapeHtml(item.instance)+' · '+time(item.observed_at)+'</div><div class="tiny muted">'+escapeHtml(item.incident_id)+'</div></button>').join('') : '<div class="empty">从服务现场注入一次故障。Agent 上线后会接手监控告警。</div>';
-    const item=state.incidents.find(row=>incidentKey(row)===selectedIncident);
-    $('question-box').hidden = !item || incidentScope==='checks';
-    $('sessions').innerHTML=state.sessions.slice(0,12).map(session=>'<div class="event"><span class="tiny muted">'+time(session.started_at)+'</span>'+sessionButton(session.source,session.id,short(session.id))+'<span class="tiny muted">'+(session.parent_session_id?'分支':'主会话')+' · '+session.message_count+' 条记录</span></div>').join('') || '<p class="muted">Agent 上线或运行检查后，这里会出现真实会话。</p>';
-    if (!item) { $('incident-detail').innerHTML='<p class="muted">'+(incidentScope==='checks'?'运行检查后，可在这里打开检查样本的会话。':'在服务现场注入故障，查看 Agent 怎样接手与交接。')+'</p>'; return; }
-    const version=JSON.stringify(item);
-    if (version!==detailVersion) {
-      detailVersion=version;
-      const branch=item.investigation, report=branch?.report || item.report || {};
-      const probes=branch?.probes || [], states=[['告警与初判',true],['分支补查',!!branch],['Page 工程师',!!item.page],['恢复验证',item.status==='recovered']];
-      $('incident-detail').classList.remove('empty');
-      $('incident-detail').innerHTML='<div class="row"><h3>'+escapeHtml(item.service)+' · '+escapeHtml(item.instance)+'</h3>'+badge(item.status)+'</div><div class="tiny muted">'+escapeHtml(item.incident_id)+'</div><div class="timeline">'+states.map(([label,done])=>'<span class="'+(done?'done':'')+'">'+label+'</span>').join('')+'</div><h3>当前判断</h3><div class="report">'+escapeHtml(report.analysis || report.summary || '正在收集现场证据…')+'</div><div class="probes">'+probes.map((probe,i)=>(i?'<span class="muted">→</span>':'')+'<span class="probe">'+escapeHtml(probe.http_status)+'</span>').join('')+'</div>'+(report.recovery_plan?'<p class="tiny muted">恢复建议 · '+escapeHtml(report.recovery_plan.action==='clear_lab_fault'?'确认后解除本次实验故障，并检查两个独立健康窗口':report.recovery_plan.action)+'</p>':'')+'<div class="buttons">'+sessionButton(item.source,item.session_id,'查看初判会话',item.report_item_id)+(branch?sessionButton(item.source,branch.session_id,'查看分支调查',branch.report_item_id):'')+'</div><p class="tiny muted">Skill '+escapeHtml(short(item.skill_sha256))+' · 报告 Item '+escapeHtml(item.report_item_id)+'</p>';
+  function investigatorName(thread){return thread.instance==='instance-a'?'调查员 A':thread.instance==='instance-b'?'调查员 B':'调查成员';}
+  function percent(value){return value==null?'—':(Number(value)*100).toFixed(1)+'%';}
+  function toast(message){$('toast').textContent=message;$('toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').style.display='none',4500);}
+  async function api(path,body){const response=await fetch(path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw new Error(data.error||'请求失败');return data;}
+  async function action(body){if(actionBusy)return;actionBusy=true;try{const result=await api('/api/actions',body);await refresh();return result;}catch(error){toast(error.message);}finally{actionBusy=false;}}
+  function setContent(id,html){const node=$(id);if(node.dataset.rendered!==html){const open=[...node.querySelectorAll('details[open]')].map(detail=>detail.dataset.key).filter(Boolean);node.innerHTML=html;node.dataset.rendered=html;node.querySelectorAll('details[data-key]').forEach(detail=>detail.open=open.includes(detail.dataset.key));}}
+  function details(title,value,key){return '<details'+(key?' data-key="'+esc(key)+'"':'')+'><summary>'+esc(title)+'</summary><pre>'+esc(pretty(value))+'</pre></details>';}
+  function services(){return (state?.instances||[]).flatMap(instance=>instance.services.map(service=>({...service,instance:instance.id}))).filter(matchesScope);}
+  function matchesScope(row){return (!$('instance-filter').value||row.instance===$('instance-filter').value)&&(!$('service-filter').value||row.service===$('service-filter').value||row.name===$('service-filter').value);}
+  function incidentRecords(){
+    const reports=(state?.incidents||[]).filter(item=>!item.source.startsWith('check:'));
+    if(!Array.isArray(state?.business?.alerts))return reports;
+    return state.business.alerts.map(alert=>{const saved=reports.find(item=>item.incident_id===alert.incident_id&&item.instance===alert.instance);return {...alert,...saved,instance:alert.instance,source:saved?.source||alert.report_source||'monitor:'+alert.instance,status:saved?.status||alert.status||'open',observed_at:alert.timestamp||alert.emitted_at||saved?.observed_at,monitor_only:!saved};});
+  }
+  function incidents(){return incidentRecords().filter(matchesScope);}
+  function key(item){return item.instance+'|'+item.incident_id;}
+  function canRequestRecovery(item){
+    const plan=item?.investigation?.report?.recovery_plan||item?.page?.report?.recovery_plan;
+    return !!item&&!item.monitor_only&&!!item.page&&item.status!=='recovered'
+      &&plan?.action==='clear_lab_fault'&&plan.approval_required===true;
+  }
+  function recoveryItem(request){
+    return incidentRecords().find(item=>item.incident_id===request?.incident_id&&item.source===request.source&&item.instance===request.instance);
+  }
+  function canApproveRecovery(request){
+    const item=recoveryItem(request),environment=item?.environment_id||item?.observation?.environment_id;
+    return request?.status==='awaiting_approval'&&canRequestRecovery(item)
+      &&request.action==='clear_lab_fault'&&!!request.operation&&!!request.scope
+      &&environment===request.environment_id
+      &&(!item.recovery||item.recovery.operation===request.operation&&item.recovery.status==='awaiting_approval');
+  }
+  function selectedRecoveryItem(){
+    return incidentRecords().filter(item=>item.instance===$('fault-instance').value&&item.service===$('fault-service').value&&canRequestRecovery(item))
+      .sort((a,b)=>(b.observed_at||0)-(a.observed_at||0))[0];
+  }
+  function newerRecovery(current,incoming){
+    const rank={awaiting_approval:1,verifying:2,recovered:3};
+    return current?.operation===incoming?.operation&&(rank[current.status]||0)>(rank[incoming.status]||0)?current:incoming;
+  }
+  function renderRecoveryControls(){
+    const item=selectedRecoveryItem(),status=item?.recovery?.status;
+    $('request-recovery').disabled=!item||recoveryBusy;
+    $('request-recovery').textContent=status==='awaiting_approval'?'批准恢复':status==='verifying'?'查看恢复验证':'申请恢复';
+    $('recovery-gate').textContent=item?'当前申请范围：'+instanceName(item.instance)+' / '+item.service+' / '+item.incident_id:'仅可为已完成工程师交接、且恢复方案要求清除实验故障的事故申请恢复。';
+    if(recoveryRequest){
+      const current=recoveryItem(recoveryRequest);
+      if(current?.recovery?.operation===recoveryRequest.operation)recoveryRequest={...recoveryRequest,...newerRecovery(recoveryRequest,current.recovery)};
+      renderRecoveryDialog();
     }
-    const questions=(state.questions || []).filter(question=>question.incident_id===item.incident_id);
-    $('answers').innerHTML=questions.map(question=>'<div class="message"><div class="tiny muted">'+escapeHtml(question.question || '')+' · '+escapeHtml(labels[question.status]||question.status)+'</div><p class="report">'+escapeHtml(question.answer || question.error || (question.status==='failed'?question.output:'Agent 正在核对证据…'))+'</p>'+(question.session_id?sessionButton(item.source,question.session_id,'查看这次追问',question.report_item_id):'')+'</div>').join('');
   }
-  function renderMemory() {
-    const memory=state.memory || {}, facts=memory.facts || [], recalls=memory.recalls || [];
-    $('review-memory').disabled = !(state.agent.stages[2]?.implemented) || !state.incidents.some(item=>item.status==='recovered');
-    let body = memory.status ? '<p>'+badge(memory.status)+'</p>' : '';
-    if (!facts.length) body+='<div class="card empty">完成一次故障调查并确认恢复后，点击“复盘已恢复事故”。Memory 会保留事实及原始会话来源。</div>';
-    body+=facts.map(entry=>{const fact=entry.fact || entry.evidence || entry;return '<div class="card memory-card"><div class="row"><h3>'+escapeHtml(fact.service || '事故事实')+'</h3><button class="small" data-recall="'+escapeHtml(fact.incident_id)+'">新会话召回</button></div><p>历史探测 · '+escapeHtml((fact.probe_statuses || []).join(' → '))+'</p><p class="tiny muted">'+escapeHtml(fact.incident_id)+' · 恢复时间 '+time(fact.recovery_end)+'</p><p class="tiny muted">来源 '+escapeHtml(short(fact.source_session_id))+' / Item '+escapeHtml(fact.source_report_item_id)+'</p><div class="buttons">'+sessionButton((fact.source_run || '').split('/').pop()+'/'+fact.instance,fact.source_session_id,'查看原始事故',fact.source_report_item_id)+'</div></div>';}).join('');
-    body+=recalls.map(entry=>{const result=entry.result || entry;return '<div class="card memory-card"><h3>新会话核对</h3><p>'+badge(result.status)+' '+sessionButton(entry.source || 'memory:'+entry.id,result.session_id,'查看召回会话',result.report_item_id)+'</p><p class="tiny muted">实际读取历史后，再查询当前 HTTP · '+escapeHtml(labels[result.report?.current_status] || result.report?.current_status || '')+'</p><details><summary>查看记忆与现场证据</summary><pre>'+escapeHtml(pretty(result))+'</pre></details></div>';}).join('');
-    if (memory.job) body+='<p>'+badge(memory.job.status)+'</p>'+(memory.job.status==='failed'?'<pre>'+escapeHtml(memory.job.output)+'</pre>':'');
-    if (memory.last_error) body+='<pre>'+escapeHtml(pretty(memory.last_error))+'</pre>';
-    $('memory-content').innerHTML=body;
+  function renderRecoveryDialog(){
+    if(!recoveryRequest)return;
+    const request=recoveryRequest,report=request.report||{},status=request.status;
+    const fields=[['环境',instanceName(request.instance)],['服务',request.service],['事故',request.incident_id],['执行范围',request.scope],['受控动作','清除本次实验故障']];
+    let body='<div class="row" style="margin:12px 0"><span class="badge warn">本地演练授权</span>'+badge(status)+'</div>';
+    body+='<p class="tiny muted" style="margin-bottom:14px">请核对本次事故、调查结论和执行范围。批准后，系统按此范围受控清除实验故障，再由巡检验证恢复。</p>';
+    body+='<table class="data-table"><tbody>'+fields.map(([name,value])=>'<tr><th>'+esc(name)+'</th><td>'+esc(value||'—')+'</td></tr>').join('')+'</tbody></table>';
+    body+='<h3 style="margin:17px 0 8px">调查结论</h3><div class="chat-text">'+textHtml(report.analysis||report.summary||'请查看原始调查报告。')+'</div>';
+    body+='<div class="buttons" style="margin:12px 0">'+sessionButton(request.source,request.session_id,'查看绑定的调查报告',request.report_item_id)+'</div>';
+    if(status==='verifying')body+='<div class="alert-banner">已记录本地批准并执行受控恢复，正在等待两个独立健康窗口。</div>';
+    if(status==='recovered')body+='<div class="alert-banner clear">后续巡检已验证恢复，并将健康检查点关联回这起事故。</div>';
+    body+=details('申请、批准与执行证据',request,'recovery-'+request.operation);
+    if(recoveryError)body+='<div class="chat-error">'+esc(recoveryError)+'</div>';
+    setContent('recovery-content',body);
+    $('approve-recovery').hidden=status!=='awaiting_approval';
+    $('approve-recovery').disabled=recoveryBusy||!canApproveRecovery(request);
+    $('recovery-action-note').textContent=recoveryBusy?'正在提交本次明确批准…':status==='awaiting_approval'?'批准记录代表当前本地工作台的演练确认。':status==='verifying'?'执行完成后仍需等待巡检验证。':'恢复记录已保留，可回查原始证据。';
   }
-  function renderLearning() {
-    const learning=state.learning || {};
-    $('learning-status').innerHTML=badge(learning.status || 'offline');
-    const release=learning.last_release;
-    let body='<div class="card"><div class="row"><div><div class="metric-label">当前正式版</div><strong>'+escapeHtml(short(learning.active_sha256))+'</strong></div>'+(release?badge(release.status):'')+'</div>';
-    if (release) body+='<p class="tiny muted">上一版 '+escapeHtml(short(release.previous_sha256))+'</p><div class="timeline">'+Object.entries(release.adoptions || {}).map(([alias,proof])=>'<span class="'+(proof.passed?'done':'')+'">'+escapeHtml(alias)+' · '+escapeHtml((proof.probe_http_statuses || []).join(' → '))+'</span>').join('')+'</div>';
-    body+='</div>';
-    if (!(learning.batches || []).length) body+='<div class="empty">后台等待两端已恢复、已归档且使用同一版本的事故经历。只有一端完成时，在线巡检继续。</div>';
-    body+=(learning.batches || []).map(batch=>'<div class="card memory-card"><div class="row"><h3>独立评测与发布决定</h3>'+badge(batch.status)+'</div>'+((batch.evaluation?.cases || []).length?'<table class="evaluation"><thead><tr><th>现场</th><th>现行版</th><th>候选版</th></tr></thead><tbody>'+batch.evaluation.cases.map(row=>'<tr><td>'+escapeHtml(({intermittent:'间歇失败',persistent:'持续失败','not-reproduced':'未复现'})[row.case] || row.case)+'</td><td>'+badge(row.baseline.passed?'passed':'failed')+'</td><td>'+badge(row.candidate.passed?'passed':'failed')+'</td></tr>').join('')+'</tbody></table>':'<p class="muted">'+escapeHtml(batch.error || '这批经历保留现行方法。')+'</p>')+'<details><summary>来源与评测证据</summary><pre>'+escapeHtml(pretty(batch))+'</pre></details></div>').join('');
-    if (learning.diff) body+='<div class="card memory-card"><details><summary>查看获准 Skill 的改动</summary><pre>'+escapeHtml(learning.diff)+'</pre></details></div>';
-    $('learning-content').innerHTML=body;
+  async function requestRecovery(item){
+    if(recoveryBusy)return;
+    if(!canRequestRecovery(item)&&!item?.recovery){toast('需要先完成事故调查与工程师交接，并给出可执行的恢复方案。');return;}
+    recoveryBusy=true;recoveryError='';renderRecoveryControls();
+    try{
+      const incoming=item.recovery||await api('/api/actions',{action:'recovery_request',source:item.source,incident_id:item.incident_id});
+      recoveryRequest=newerRecovery(recoveryRequest,incoming);
+      if(!recoveryRequest.operation||!recoveryRequest.scope)throw new Error('恢复申请缺少已绑定的事故范围，请重新核对。');
+      renderRecoveryDialog();
+      if($('practice-drawer').open)$('practice-drawer').close();
+      if(!$('recovery-dialog').open)$('recovery-dialog').showModal();
+      await refresh();
+    }catch(error){recoveryError=error.message;toast(error.message);}
+    finally{recoveryBusy=false;renderRecoveryControls();}
   }
-  async function refresh() { try { state=await api('/api/state'); $('connection').textContent='现场更新 '+time(state.time); renderControl(); renderOverview(); renderIncidents(); renderMemory(); renderLearning(); } catch(error) { $('connection').textContent='连接中断'; toast(error.message); } }
-  async function openSession(source,id,item) { try { const result=await api('/api/session?source='+encodeURIComponent(source)+'&session='+encodeURIComponent(id)+(item?'&item='+encodeURIComponent(item):'')); switchTab('incidents'); $('session-panel').hidden=false; $('session-title').textContent='执行轨迹 · '+short(result.session.id); $('messages').innerHTML=result.messages.map(message=>'<div class="message"><div class="message-label">'+escapeHtml(message.role)+' · Item '+message.id+(message.tool_name?' · '+escapeHtml(message.tool_name):'')+'</div>'+(message.tool_calls.length?'<pre>'+escapeHtml(pretty(message.tool_calls))+'</pre>':'')+'<pre>'+escapeHtml(message.content || '')+'</pre></div>').join(''); $('session-panel').scrollIntoView({behavior:'smooth',block:'start'}); } catch(error) { toast(error.message); } }
-  document.addEventListener('click', async event => {
-    const button=event.target.closest('button'); if (!button) return;
-    if (button.dataset.stage) { stage=Number(button.dataset.stage); renderControl(); }
-    if (button.dataset.tab) switchTab(button.dataset.tab);
-    if (button.dataset.action) await action({action:button.dataset.action});
-    if (button.dataset.fault) await action({action:'fault',instance:button.dataset.instance,service:button.dataset.service,mode:button.dataset.fault});
-    if (button.dataset.incident) { selectedIncident=button.dataset.incident; detailVersion=null; renderIncidents(); }
-    if (button.dataset.session) await openSession(button.dataset.source,button.dataset.session,button.dataset.item);
-    if (button.dataset.recall) await action({action:'memory_recall',incident_id:button.dataset.recall});
-  });
-  $('live-incidents').onclick=()=>{incidentScope='live';renderIncidents();};
-  $('check-incidents').onclick=()=>{incidentScope='checks';renderIncidents();};
-  $('check').onclick=()=>{ $('check-details').open=true; return action({action:'check',stage}); };
-  $('review-memory').onclick=()=>action({action:'memory_review'});
-  $('close-session').onclick=()=>$('session-panel').hidden=true;
-  $('ask').onclick=()=>{const item=state?.incidents.find(row=>incidentKey(row)===selectedIncident);const question=$('question').value.trim();if(item&&question)action({action:'question',source:item.source,incident_id:item.incident_id,question});};
-  $('copy-prompt').onclick=async()=>{const quote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";const text=prompts[stage-1]+' 每次只完成这一关，在 '+state.agent.implementation+' 中实现。完成后运行 .deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage '+stage+' --implementation '+quote(state.agent.implementation)+' --workbench '+quote(state.root)+(state.agent.mode==='live'?' --live':'')+'，修到通过，再告诉我回工作台看哪里。';try{await navigator.clipboard.writeText(text);toast('本关提示词已复制');}catch(error){toast('复制失败，请从仓库引导文件读取本关提示词');}};
-  refresh(); setInterval(refresh,1800);
+  async function approveRecovery(){
+    if(recoveryBusy||!canApproveRecovery(recoveryRequest))return;
+    const bound={source:recoveryRequest.source,incident_id:recoveryRequest.incident_id,operation:recoveryRequest.operation,
+      scope:recoveryRequest.scope,environment_id:recoveryRequest.environment_id};
+    recoveryBusy=true;recoveryError='';renderRecoveryDialog();
+    try{
+      recoveryRequest=await api('/api/actions',{action:'recovery_approve',...bound,confirmed:true});
+      renderRecoveryDialog();await refresh();
+    }catch(error){recoveryError=error.message;}
+    finally{recoveryBusy=false;renderRecoveryControls();}
+  }
+  function evaluationBadge(result){return badge(result?.valid_trace===false?'inconclusive':result?.passed?'passed':'failed');}
+  function jobFailureSummary(job){
+    if(job.status==='interrupted')return '本次调查已中断，尚未形成完整结论。';
+    const evidence=String(job.error||'')+'\n'+String(job.output||'');
+    if(/余额不足|insufficient[\s_-]*(?:account[\s_-]*)?balance|insufficient[\s_-]+credit/i.test(evidence))return '模型服务余额不足，本次调查未完成。';
+    if(/额度不足|insufficient_quota/i.test(evidence))return '模型服务额度不足，本次调查未完成。';
+    const error=String(job.error||'').trim().split('\n')[0];
+    return error?(error.length>220?error.slice(0,220)+'…':error):'本次调查未完成，请展开运行记录查看原因。';
+  }
+  function jobFailureHtml(job){
+    const record=[job.error?String(job.error):'',job.output?String(job.output):''].filter(Boolean).join('\n\n');
+    return '<div class="chat-error">'+esc(jobFailureSummary(job))+(record?details('运行记录',record,'chat-job-'+(job.id||job.started_at||'error')):'')+'</div>';
+  }
+  function context(){const result={page};if($('instance-filter').value)result.instance=$('instance-filter').value;if($('service-filter').value)result.service=$('service-filter').value;const incident=incidentRecords().find(item=>key(item)===selectedIncident);if(incident&&matchesScope(incident))Object.assign(result,{instance:incident.instance,service:incident.service,incident_id:incident.incident_id});return result;}
+  function sessionButton(source,id,title,item){if(!source||!id)return '';return '<button class="small" data-session="'+esc(id)+'" data-source="'+esc(source)+'"'+(item?' data-item="'+esc(item)+'"':'')+'>'+esc(title||'执行证据')+'</button>';}
+  function statusDot(value){return '<span class="dot '+(value==='healthy'?'good':value==='abnormal'?'bad':'warn')+'"></span>';}
+  function switchPage(name){if(!names[name])return;page=name;document.querySelectorAll('.page').forEach(node=>node.hidden=node.id!==name);document.querySelectorAll('.nav').forEach(node=>{node.classList.toggle('active',node.dataset.page===name);node.setAttribute('aria-current',node.dataset.page===name?'page':'false');});$('page-title').textContent=names[name][0];$('page-description').textContent=names[name][1];document.title='On-call · '+names[name][0];renderBusiness();renderChatStatus();}
+  function renderOverview(){const rows=services(),all=incidents(),active=all.filter(item=>item.status!=='recovered'),requests=rows.reduce((sum,row)=>sum+Number(row.metrics?.requests||0),0),p95=rows.filter(row=>row.metrics?.p95_ms!=null).map(row=>Number(row.metrics.p95_ms));const values=[['当前告警',active.length,'等待调查或恢复'],['异常服务',rows.filter(row=>row.health==='abnormal'||row.health==='unavailable').length,'当前指标窗口'],['请求总数',requests.toLocaleString('zh-CN'),'最近 30 秒'],['最高 P95',p95.length?Math.max(...p95).toFixed(0):'—','毫秒 · 所选服务']];
+    let body='<div class="summary">'+values.map(([label,value,note])=>'<div class="stat"><div class="stat-label">'+esc(label)+'</div><div class="stat-value">'+esc(value)+'</div><div class="stat-note">'+esc(note)+'</div></div>').join('')+'</div>';
+    body+='<div class="alert-banner '+(!active.length?'clear':'')+'"><span class="dot '+(active.length?'bad':'good')+'"></span><span>'+esc(active.length?active.length+' 起事故正在调查或等待恢复':'当前没有待处理的事故告警')+'</span></div>';
+    body+='<div class="card"><div class="card-title"><h3>服务健康</h3><span class="tiny muted">30 秒窗口</span></div><table class="service-table"><thead><tr><th>服务 / 环境</th><th>5xx</th><th>P95</th><th>状态</th></tr></thead><tbody>'+rows.map(row=>'<tr><td><button class="service-link" data-service-scope="'+esc(row.name)+'" data-instance-scope="'+esc(row.instance)+'">'+esc(row.name)+'</button><div class="instance-name">'+esc(instanceName(row.instance))+'</div></td><td>'+percent(row.metrics?.error_rate)+'</td><td>'+(row.metrics?.p95_ms==null?'—':Number(row.metrics.p95_ms).toFixed(0)+' ms')+'</td><td><div class="service-status">'+statusDot(row.health)+esc(labels[row.health]||row.health)+'</div></td></tr>').join('')+'</tbody></table></div>';
+    body+='<div class="card"><div class="card-title"><h3>事故与调查</h3><span class="tiny muted">'+all.length+' 起记录</span></div>'+(all.length?all.slice(0,8).map(incidentCard).join(''):'<div class="empty">尚无事故。服务发生异常后，监控告警会出现在这里。</div>')+'</div>';
+    setContent('overview-content',body);
+  }
+  function incidentCard(item){const branch=item.investigation,report=branch?.report||item.report||{},expanded=selectedIncident===key(item),probes=branch?.probes||[];let body='<article class="incident-card"><div class="row"><button class="incident-open" data-incident="'+esc(key(item))+'"><div class="row"><h3>'+esc(item.service)+' <span class="tiny muted">· '+esc(instanceName(item.instance))+'</span></h3>'+badge(item.status)+'</div><p class="incident-summary">'+esc(report.analysis||report.summary||(item.monitor_only?'监控已发出告警，等待 Agent 接手调查。':'正在收集服务证据…'))+'</p><div class="incident-id">'+esc(item.incident_id)+' · '+time(item.observed_at)+'</div></button></div>';
+    if(expanded){const timeline=[['告警',true],['调查',!!branch],['工程师交接',!!item.page],['批准恢复',item.recovery?.approval?.confirmed===true],['恢复验证',item.status==='recovered']];body+='<div class="timeline">'+timeline.map(([label,done])=>'<span class="'+(done?'done':'')+'">'+label+'</span>').join('')+'</div><div class="probes">'+probes.map((probe,i)=>(i?'<span class="muted">→</span>':'')+'<span class="probe">'+esc(probe.http_status)+'</span>').join('')+'</div>'+(report.recovery_plan?'<p class="incident-summary">恢复建议 · '+esc(report.recovery_plan.action==='clear_lab_fault'?'申请并明确批准后清除本次实验故障，再核对两个独立健康窗口':'继续观察当前服务，等待更多证据')+'</p>':'')+'<div class="buttons" style="margin-top:10px"><button class="small" data-investigate="'+esc(key(item))+'"'+(!chatAvailable()?' disabled':'')+'>交给 Agent 调查</button>'+'<button class="small" data-recovery="'+esc(key(item))+'"'+(!canRequestRecovery(item)&&!item.recovery?' disabled':'')+'>'+esc(item.recovery?.status==='awaiting_approval'?'批准恢复':item.recovery?.status==='verifying'?'查看恢复验证':item.status==='recovered'?'恢复证据':'申请恢复')+'</button>'+sessionButton(item.monitor_only?null:item.source,item.session_id,'初判证据',item.report_item_id)+(branch?sessionButton(item.source,branch.session_id,'补查证据',branch.report_item_id):'')+'</div>';}return body+'</article>';}
+  function lineChart(history,field){const points=(history||[]).filter(row=>Number.isFinite(Number(row[field]))).slice(-60);if(points.length<2)return '<div class="empty">正在积累指标窗口…</div>';const values=points.map(row=>Number(row[field])),max=Math.max(...values,field==='error_rate'?.05:1),coordinates=values.map((value,i)=>(i*398/(values.length-1)+1).toFixed(1)+','+(85-value/max*68).toFixed(1)).join(' '),color=field==='error_rate'&&values.some(v=>v>=.05)?'#bd7b56':'#739a62';return '<svg class="chart" viewBox="0 0 400 96" preserveAspectRatio="none" aria-label="'+esc(field==='error_rate'?'错误率走势':'响应时间走势')+'"><line x1="0" y1="17" x2="400" y2="17" stroke="#edf0e7"/><line x1="0" y1="51" x2="400" y2="51" stroke="#edf0e7"/><line x1="0" y1="85" x2="400" y2="85" stroke="#e2e8dc"/><polyline points="'+coordinates+'" fill="none" stroke="'+color+'" stroke-width="1.7" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span>'+time(points[0].time)+'</span><span>上限 '+(field==='error_rate'?percent(max):max.toFixed(0)+' ms')+'</span><span>'+time(points.at(-1).time)+'</span></div>';}
+  function renderMetrics(){setContent('metrics-content','<div class="metric-grid">'+services().map(row=>'<div class="card metric-chart"><div class="row"><div><h3>'+esc(row.name)+'</h3><div class="tiny muted">'+esc(instanceName(row.instance))+'</div></div>'+badge(row.health)+'</div><div class="row"><span class="tiny muted">5xx 比例</span><strong>'+percent(row.metrics?.error_rate)+'</strong></div>'+lineChart(row.history,'error_rate')+'<div class="row" style="margin-top:17px"><span class="tiny muted">P95 响应时间</span><strong>'+(row.metrics?.p95_ms==null?'—':Number(row.metrics.p95_ms).toFixed(0)+' ms')+'</strong></div>'+lineChart(row.history,'p95_ms')+'<p class="metric-sub">'+(row.checkpoint?'最近巡检 '+time(row.checkpoint.checked_at)+' · '+esc(labels[row.checkpoint.status]||row.checkpoint.status):'Agent 尚未留下巡检记录')+'</p></div>').join('')+'</div>');}
+  function renderLogs(){const query=$('log-search').value.trim().toLowerCase(),level=$('log-level').value;const rows=(state.business?.logs||[]).filter(matchesScope).filter(row=>{const status=Number(row.http_status??row.status),bad=status>=400||['error','warn','warning'].includes(String(row.level).toLowerCase());return (!level||(level==='error'?bad:!bad))&&(!query||pretty(row).toLowerCase().includes(query));});$('log-count').textContent=rows.length+' 条';setContent('logs-content',rows.length?rows.slice(0,100).map(row=>{const status=row.http_status??row.status;return '<div class="log-row"><div class="log-meta"><span>'+time(row.timestamp??row.time??row.checked_at)+'</span><span>'+esc(instanceName(row.instance))+'</span><strong>'+esc(row.service)+'</strong>'+(status?'<span class="badge '+(Number(status)>=400?'bad':'good')+'">'+esc(status)+'</span>':'')+'</div><div class="log-content">'+esc(row.message||[row.method||'',row.path||'',row.latency_ms!=null?Number(row.latency_ms).toFixed(1)+' ms':''].filter(Boolean).join(' · ')||'请求回执')+'</div></div>';}).join(''):'<div class="empty">当前筛选范围还没有请求日志。</div>');}
+  function renderChanges(){const rows=(state.business?.changes||[]).filter(matchesScope);setContent('changes-content','<div class="card"><div class="card-title"><h3>环境变更记录</h3><span class="tiny muted">'+rows.length+' 条</span></div>'+(rows.length?rows.slice(0,60).map(row=>'<div class="change"><div class="row"><div class="change-title">'+esc(row.title||row.kind||'环境变更')+'</div><span class="tiny muted">'+time(row.timestamp??row.time)+'</span></div><div class="tiny muted">'+esc(instanceName(row.instance))+(row.service?' / '+esc(row.service):'')+'</div>'+(changeDescription(row)?'<p class="change-description">'+esc(changeDescription(row))+'</p>':'')+details('变更证据',row,'change-'+(row.id||row.timestamp||row.time)+'-'+row.instance)+(row.incident_id?'<div class="incident-id">'+esc(row.incident_id)+'</div>':'')+'</div>').join(''):'<div class="empty">尚无变更记录。实验配置和故障状态的改动会保留在这里。</div>')+'</div><p class="page-note">这里记录本地环境的实际配置变更。</p>');}
+  function renderMemory(){const memory=state.memory||{},facts=memory.facts||[],recalls=memory.recalls||[];$('review-memory').disabled=!(state.agent.stages[2]?.implemented)||!state.incidents.some(item=>!item.source.startsWith('check:')&&item.status==='recovered')||memory.job?.status==='running';let body=facts.length?'':(memory.reviews?.some(review=>review.review_status==='keep')?'<div class="card empty">复盘已完成，本次保留现状，没有发布新的历史事实。后续任务仍会核对当前现场。</div>':'<div class="card empty">完成事故调查并验证恢复后，可以复盘保留有来源的事实。新任务仍会重新检查当前服务。</div>');body+=facts.map(entry=>{const fact=entry.fact||entry.evidence||entry;return '<div class="card fact"><div class="row"><h3>'+esc(fact.service)+' <span class="tiny muted">· '+esc(instanceName(fact.instance))+'</span><button class="small" data-recall="'+esc(fact.incident_id)+'">新会话召回</button></div><p>当时探测 '+esc((fact.probe_statuses||[]).join(' → '))+'</p><p class="tiny muted">恢复确认 '+time(fact.recovery_end)+' · '+esc(fact.incident_id)+'</p><div class="buttons">'+sessionButton((fact.source_run||'').split('/').pop()+'/'+fact.instance,fact.source_session_id,'查看原始事故',fact.source_report_item_id)+'</div>'+details('来源与复盘证据',fact,'fact-'+fact.incident_id)+'</div>';}).join('');body+=recalls.map(entry=>{const result=entry.result||entry;return '<div class="card fact"><div class="row"><h3>新会话核对</h3>'+badge(result.status)+'</div><p class="tiny muted">读取历史事实后，本次 HTTP 指标判断为 '+esc(labels[result.report?.current_status]||result.report?.current_status||'待核对')+'</p><div class="buttons">'+sessionButton(entry.source||'memory:'+entry.id,result.session_id,'查看召回证据',result.report_item_id)+'</div>'+details('记忆与当前现场',result,'recall-'+entry.id)+'</div>';}).join('');if(memory.job)body+='<div class="card"><div class="row"><span class="tiny muted">最近复盘或召回</span>'+badge(memory.job.status)+'</div>'+(memory.job.status==='failed'?details('失败原因',memory.job.output,'memory-error'):'')+'</div>';if(memory.reviews?.length)body+=details('复盘决定与来源',memory.reviews,'memory-reviews');if(memory.last_error)body+=details('复盘信息',memory.last_error,'last-memory-error');setContent('memory-content',body);}
+  function renderLearning(){const learning=state.learning||{},release=learning.last_release;let body='<div class="card"><div class="row"><h3>团队正在使用的方法</h3>'+badge(release?.status||learning.status||'offline')+'</div><div class="release-hash">'+esc(short(learning.active_sha256))+'</div><p class="tiny muted">'+(release?'上一版本 '+esc(short(release.previous_sha256)):'事故经历形成批次后，后台生成候选并独立评测。')+'</p>'+(release?'<div class="adoptions">'+Object.entries(release.adoptions||{}).map(([alias,proof])=>'<div class="adoption">'+esc(instanceName(alias))+' · '+esc((proof.probe_http_statuses||[]).join(' → '))+' '+(proof.passed?'已核实':'待核实')+'</div>').join('')+'</div>':'')+'</div>';if(!(learning.batches||[]).length)body+='<div class="card empty">等待两端已经恢复并归档的事故经历。巡检会继续运行。</div>';body+=(learning.batches||[]).map((batch,index)=>'<div class="card"><div class="card-title"><h3>独立评测与版本决定</h3>'+badge(batch.status)+'</div>'+((batch.evaluation?.cases||[]).length?'<table class="eval-table"><thead><tr><th>用例</th><th>现行版</th><th>候选版</th></tr></thead><tbody>'+batch.evaluation.cases.map(row=>'<tr><td>'+esc(({intermittent:'间歇失败',persistent:'持续失败','not-reproduced':'未复现'})[row.case]||row.case)+'</td><td>'+evaluationBadge(row.baseline)+'</td><td>'+evaluationBadge(row.candidate)+'</td></tr>').join('')+'</tbody></table>':'<p class="tiny muted">'+esc(batch.error||'这批经历保留现行方法。')+'</p>')+details('来源与逐题证据',batch,'batch-'+index)+'</div>').join('');if(learning.diff)body+='<div class="card">'+details('查看获准 Skill 的改动',learning.diff,'skill-diff')+'</div>';setContent('learning-content',body);}
+  function renderBusiness(){if(!state)return;renderOverview();renderMetrics();renderLogs();renderChanges();renderMemory();renderLearning();renderRecoveryControls();}
+  function verified(number){return (state.checks||[]).some(check=>check.stage>=number&&check.verified);}
+  function renderPractice(){const agent=state.agent;$('agent-status').innerHTML=badge(agent.status);$('agent-note').textContent=agent.implementation_error||((agent.code_changed&&agent.running_sha256)?'代码已更新，应用后进入新的运行，已有记录保留。':'两套业务环境独立运行。');$('code-path').textContent=implementationLabel(agent.implementation)+' · '+short(agent.code_sha256);$('workspace').textContent='本地运行工作区';$('start').disabled=['running','starting'].includes(agent.status);$('stop').disabled=!['running','starting'].includes(agent.status);$('check').disabled=(state.checks||[]).some(check=>check.status==='running');setContent('stages',(agent.stages||[]).map(item=>'<button class="step '+(item.number===stage?'active':'')+'" data-stage="'+item.number+'"><div class="row"><span>'+item.number+' · '+esc(item.title)+'</span>'+badge(verified(item.number)?'passed':item.implemented?'unchecked':'unimplemented')+'</div></button>').join(''));$('guide-text').textContent=observations[stage-1];const checks=(state.checks||[]).filter(check=>check.stage===stage).slice(-3).reverse();setContent('checks',checks.length?checks.map(check=>'<div class="check-record"><div class="row">'+badge(check.status)+'<span class="tiny muted">'+time(check.finished_at||check.started_at)+' · '+short(check.implementation_sha256)+'</span></div><pre>'+esc(check.log||(check.evidence?pretty(check.evidence):'正在运行检查…'))+'</pre></div>').join(''):'<p class="empty">检查后，这里会保留实际运行结果。</p>');setContent('events',(state.events||[]).slice(0,8).map(event=>'<div class="event"><time>'+time(event.time)+'</time><span>'+esc(event.message)+'</span></div>').join('')||'<p class="empty">等待运行事件。</p>');}
+  function chatAvailable(){return !!(state?.chat?.available??(state?.agent?.status==='running'&&state?.agent?.active_stage>=1));}
+  function currentConversation(){return (state?.conversations||[]).find(item=>item.id===conversationId)||chatData?.conversation;}
+  function chatIsRunning(){return ['running','starting','queued','investigating'].includes(currentConversation()?.status)||((chatData?.jobs||[]).some(job=>job.status==='running'||job.status==='queued'));}
+  function suggestedTasks(){
+    const choices={
+      metrics:['哪些服务的指标异常？请引用时间窗口。','比较环境 A 和 B 的当前指标，说明差异。'],
+      logs:['从当前请求日志里找出异常，并说明证据。','这些失败请求集中在哪些服务和时间？'],
+      changes:['最近有哪些配置变更？它们和告警时间有什么关系？','哪些判断还缺少证据，不能把变更直接当作根因？'],
+      memory:['过去类似事故是怎么处理的？先查历史，再核对当前现场。','这次判断能引用哪些已经验证的历史事实？'],
+      learning:['最近的 Skill 改进通过了哪些独立评测？','两个实例的新任务实际采用了新版吗？给我现场证据。']
+    };
+    const tasks=choices[page]||['当前有哪些服务需要关注？请结合指标说明。','调查当前告警，给我结论、证据和恢复建议。'];
+    if((currentConversation()?.active_stage||state.agent.active_stage)>=2&&page==='overview')tasks.push('把当前事故分给调查成员，并汇总各自的发现。');
+    return tasks;
+  }
+  function renderChatStatus(){
+    if(!state)return;
+    const available=chatAvailable(),agent=state.agent,conversation=currentConversation(),running=chatBusy||chatIsRunning();
+    const pinnedMode=conversation?.mode==='local-script-model'?'offline':conversation?.mode;
+    const mode=pinnedMode||state.chat?.mode||(agent.mode==='live'?'live':'offline');
+    const modeMismatch=!!pinnedMode&&!!state.chat?.mode&&pinnedMode!==state.chat.mode;
+    $('chat-status').innerHTML=badge(available?(running?'investigating':'ready'):'offline');
+    $('chat-model').textContent=mode==='offline'?'离线演示 · 脚本模型':((conversation?.model||state.chat?.model)?'实时模型 · '+(conversation?.model||state.chat.model):'实时模型');
+    $('chat-question').disabled=!available||running||modeMismatch;
+    $('chat-send').disabled=!available||running||modeMismatch||!$('chat-question').value.trim();
+    $('new-chat').disabled=!available||chatBusy;$('conversation-select').disabled=chatBusy;
+    $('composer-hint').textContent=!available?(state.chat?.reason||'接入 Agent 后即可开始调查'):modeMismatch?'当前对话来自另一种模型模式，请新建对话。':running?'正在查询现场与整理证据…':'Enter 发送 · Shift + Enter 换行';
+    const scope=context();$('chat-context').textContent='当前现场 · '+(names[page]?.[0]||'概览')+' / '+(scope.instance?instanceName(scope.instance)+' / ':'')+(scope.service||'全部服务');
+    const messageCount=(chatData?.messages||[]).filter(message=>['user','assistant'].includes(message.role)&&message.content).length;$('chat-empty').hidden=!!messageCount||running;$('chat-progress').innerHTML=running?'<div class="chat-pending"><span class="pulse"></span>'+(chatBusy?'正在准备请求…':'Agent 正在调查，请稍候…')+'</div>':'';
+    if(!messageCount){const implemented=agent.stages?.[0]?.implemented;let empty;if(!available){empty='<div class="agent-orb" style="margin:auto" aria-hidden="true">✧</div><h3>'+(implemented?'Agent 等待启动':'Agent 尚未接入')+'</h3><p>'+esc(state.chat?.reason||(implemented?'启动后即可开始调查，持续巡检也会同时运行。':'业务现场已经就绪。先接入 Agent，再直接描述任务并持续追问。'))+'</p><button id="offline-action" class="small offline-action"'+(['starting'].includes(agent.status)?' disabled':'')+'>'+(implemented&&agent.status!=='running'?'启动 Agent':'接入 Agent')+'</button>';}else{const suggestions=suggestedTasks();empty='<div class="agent-orb" style="margin:auto" aria-hidden="true">✧</div><h3>'+(conversation?'开始这次调查':'从一个问题开始')+'</h3><p>描述你需要处理的服务或事故。可以沿同一个对话继续追问。</p><div class="suggestions">'+suggestions.map(text=>'<button class="suggestion" data-suggest="'+esc(text)+'">'+esc(text)+'</button>').join('')+'</div>';}setContent('chat-empty',empty);}
+  }
+  function syncConversations(){
+    const list=state.conversations||[];
+    if(stateRoot!==state.root){stateRoot=state.root;try{conversationId=localStorage.getItem('oncall-conversation:'+state.root);}catch{}pendingConversationId=null;chatData=null;chatSignature='';conversationSignature='';}
+    if(pendingConversationId&&list.some(item=>item.id===pendingConversationId))pendingConversationId=null;
+    if(conversationId&&!list.some(item=>item.id===conversationId)&&conversationId!==pendingConversationId){conversationId=null;chatData=null;chatSignature='';}
+    if(!conversationId&&list.length){conversationId=list[0].id;rememberConversation();}
+    const display=[...list];
+    if(pendingConversationId&&!display.some(item=>item.id===pendingConversationId))display.unshift({id:pendingConversationId,title:chatData?.conversation?.title||'新对话',status:'idle'});
+    const signature=JSON.stringify(display.map(item=>[item.id,item.title,item.status]));
+    if(signature!==conversationSignature){conversationSignature=signature;$('conversation-select').innerHTML=display.length?display.map(item=>'<option value="'+esc(item.id)+'">'+esc(item.title||'对话 '+short(item.id))+(item.status==='running'?' · 调查中':'')+'</option>').join(''):'<option value="">暂无对话</option>';}
+    $('conversation-select').value=conversationId||'';
+  }
+  function rememberConversation(){try{if(conversationId)localStorage.setItem('oncall-conversation:'+state.root,conversationId);else localStorage.removeItem('oncall-conversation:'+state.root);}catch{}}
+  function textHtml(value){
+    // Only parse escaped text. Model output never supplies HTML or link attributes.
+    const lines=esc(value).replace(/\r\n?/g,'\n').split('\n');
+    function emphasis(text){
+      return text.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
+        .replace(/(^|[^\w])__([^_\n]+)__(?!\w)/g,'$1<strong>$2</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,'$1<em>$2</em>')
+        .replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g,'$1<em>$2</em>');
+    }
+    function inline(text){
+      let html='',offset=0;
+      for(const match of text.matchAll(/(`+)(.*?)\1/g)){
+        html+=emphasis(text.slice(offset,match.index))+'<code>'+match[2]+'</code>';
+        offset=match.index+match[0].length;
+      }
+      return html+emphasis(text.slice(offset));
+    }
+    function cells(line){
+      const values=[];let cell='',marker='',delimiter=false;
+      const text=line.trim();
+      for(let at=0;at<text.length;at++){
+        const character=text[at];
+        if(character==='\\'&&text[at+1]==='|'){cell+='|';at++;continue;}
+        if(character==='`'){
+          let end=at;while(text[end]==='`')end++;
+          const ticks=text.slice(at,end);if(!marker)marker=ticks;else if(marker===ticks)marker='';
+          cell+=ticks;at=end-1;
+        }else if(character==='|'&&!marker){values.push(cell.trim());cell='';delimiter=true;}
+        else cell+=character;
+      }
+      if(!delimiter)return null;
+      values.push(cell.trim());
+      if(text.startsWith('|'))values.shift();
+      if(!values.at(-1)&&text.endsWith('|'))values.pop();
+      return values;
+    }
+    function tableHeader(block,index){
+      if(index+1>=block.length)return null;
+      const head=cells(block[index]),separator=cells(block[index+1]);
+      return head&&separator&&head.length===separator.length&&separator.length
+        &&separator.every(cell=>/^:?-{3,}:?$/.test(cell))?{head,separator}:null;
+    }
+    function listItem(line){return /^(\s*)([-+*]|\d{1,9}[.)])\s+(.*)$/.exec(line);}
+    function rule(line){return /^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/.test(line);}
+    function beginsBlock(block,index){return /^\s{0,3}(?:#{1,6}(?:\s|$)|`{3,}|~{3,}|&gt;)/.test(block[index])||!!listItem(block[index])||rule(block[index])||!!tableHeader(block,index);}
+    function list(block,index,depth){
+      const first=listItem(block[index]),indent=first[1].length,ordered=/^\d/.test(first[2]),tag=ordered?'ol':'ul';
+      const start=ordered?parseInt(first[2],10):1;
+      let html='<'+tag+(ordered&&start!==1?' start="'+start+'"':'')+'>';
+      while(index<block.length){
+        const item=listItem(block[index]);
+        if(!item||item[1].length!==indent||/^\d/.test(item[2])!==ordered||rule(block[index]))break;
+        html+='<li>'+inline(item[3]);index++;
+        while(index<block.length&&block[index].trim()){
+          if(rule(block[index]))break;
+          const next=listItem(block[index]);
+          if(next&&next[1].length>indent&&depth<8){const nested=list(block,index,depth+1);html+=nested.html;index=nested.index;}
+          else if(!next&&/^\s+/.test(block[index])&&block[index].match(/^\s*/)[0].length>indent){html+='<br>'+inline(block[index].trim());index++;}
+          else break;
+        }
+        html+='</li>';
+      }
+      return {html:html+'</'+tag+'>',index};
+    }
+    function blocks(block,depth=0){
+      let html='',index=0;
+      while(index<block.length){
+        const line=block[index];
+        if(!line.trim()){index++;continue;}
+        const fence=/^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if(fence&&(fence[1][0]!=='`'||!fence[2].includes('`'))){
+          const end=new RegExp('^\\s{0,3}'+fence[1][0]+'{'+fence[1].length+',}\\s*$'),code=[];index++;
+          while(index<block.length&&!end.test(block[index]))code.push(block[index++]);
+          if(index<block.length)index++;
+          html+='<pre><code>'+code.join('\n')+'</code></pre>';continue;
+        }
+        const heading=/^\s{0,3}(#{1,6})(?:\s+|$)(.*)$/.exec(line);
+        if(heading){const level=heading[1].length;html+='<h'+level+'>'+inline(heading[2].replace(/\s+#+\s*$/,''))+'</h'+level+'>';index++;continue;}
+        const header=tableHeader(block,index);
+        if(header){
+          const rows=[];index+=2;
+          while(index<block.length&&block[index].trim()&&!beginsBlock(block,index)){const row=cells(block[index]);if(!row)break;rows.push(row);index++;}
+          const columns=Math.max(header.head.length,...rows.map(row=>row.length));
+          const align=column=>{const cell=header.separator[column]||'';return cell.startsWith(':')&&cell.endsWith(':')?'center':cell.endsWith(':')?'right':'left';};
+          html+='<div class="markdown-table"><table><thead><tr>';
+          for(let column=0;column<columns;column++)html+='<th style="text-align:'+align(column)+'">'+inline(header.head[column]||'')+'</th>';
+          html+='</tr></thead><tbody>';
+          for(const row of rows){html+='<tr>';for(let column=0;column<columns;column++)html+='<td style="text-align:'+align(column)+'">'+inline(row[column]||'')+'</td>';html+='</tr>';}
+          html+='</tbody></table></div>';continue;
+        }
+        if(rule(line)){html+='<hr>';index++;continue;}
+        const quote=/^\s{0,3}&gt; ?(.*)$/.exec(line);
+        if(quote){const quoted=[];while(index<block.length){const next=/^\s{0,3}&gt; ?(.*)$/.exec(block[index]);if(!next)break;quoted.push(next[1]);index++;}html+='<blockquote>'+(depth<4?blocks(quoted,depth+1):quoted.map(inline).join('<br>'))+'</blockquote>';continue;}
+        if(listItem(line)){const result=list(block,index,0);html+=result.html;index=result.index;continue;}
+        const paragraph=[line];index++;
+        while(index<block.length&&block[index].trim()&&!beginsBlock(block,index))paragraph.push(block[index++]);
+        html+='<p>'+paragraph.map(inline).join('<br>')+'</p>';
+      }
+      return html;
+    }
+    return blocks(lines);
+  }
+  function messageHtml(message){const calls=Array.isArray(message.tool_calls)?message.tool_calls:[],content=typeof message.content==='string'?message.content:pretty(message.content||'');if(message.role==='system')return '';if(message.role==='tool'){const title=tools[message.tool_name]||message.tool_name||'工具结果';return '<div class="chat-message trace"><details data-key="tool-'+esc(message.id)+'"><summary>'+esc(title)+'</summary><pre>'+esc(content)+'</pre></details></div>';}if(!content&&!calls.length)return '';return '<div class="chat-message '+(message.role==='user'?'user':'assistant')+'"><div class="speaker">'+esc(message.role==='user'?'你':'SRE Agent')+(message.created_at?'<span>'+time(message.created_at)+'</span>':'')+'</div>'+(calls.length?'<div class="tool-chips">'+calls.map(call=>'<span class="tool-chip">'+esc(tools[call.function?.name||call.name]||call.function?.name||call.name||'工具调用')+'</span>').join('')+'</div>':'')+(content?'<div class="chat-text">'+textHtml(content)+'</div>':'')+'</div>';}
+  function renderChat(){if(!chatData)return;const signature=JSON.stringify([chatData.messages,chatData.threads,chatData.jobs]);if(signature!==chatSignature){const body=$('chat-body'),atBottom=body.scrollHeight-body.scrollTop-body.clientHeight<90;chatSignature=signature;setContent('chat-messages',(chatData.messages||[]).map(messageHtml).join(''));const threads=chatData.threads||[];$('thread-area').hidden=!threads.length;setContent('thread-grid',threads.map(thread=>'<article class="thread-card"><div class="row"><h4>'+esc(investigatorName(thread))+'</h4>'+badge(thread.status)+'</div><p>'+esc(instanceName(thread.instance))+(thread.service?' / '+esc(thread.service):'')+'</p>'+(thread.summary?'<p>'+esc(thread.summary)+'</p>':'')+(thread.source&&thread.session_id?'<div class="buttons" style="margin-top:6px">'+sessionButton(thread.source,thread.session_id,'调查证据',thread.report_item_id)+'</div>':'')+'</article>').join(''));const latestJob=[...(chatData.jobs||[])].sort((a,b)=>(a.started_at||0)-(b.started_at||0)).at(-1);const failed=latestJob&&['failed','interrupted'].includes(latestJob.status)&&!chatIsRunning()?[latestJob]:[];$('chat-job-error').innerHTML=failed.map(jobFailureHtml).join('');if(atBottom)body.scrollTop=body.scrollHeight;}renderChatStatus();}
+  async function refreshChat(){if(!conversationId||chatLoading)return;chatLoading=true;const id=conversationId;try{const data=await api('/api/chat?conversation='+encodeURIComponent(id));if(id===conversationId){chatData=data;renderChat();}}catch(error){if(id===conversationId)$('chat-job-error').innerHTML='<div class="chat-error">'+esc(error.message)+'</div>';}finally{chatLoading=false;}}
+  async function newConversation(){const result=await api('/api/actions',{action:'chat_new'});const createdId=result.conversation?.id||result.conversation_id||result.id;conversationId=createdId;pendingConversationId=createdId;if(!createdId)throw new Error('未取得新对话记录');chatData={conversation:result.conversation||{id:conversationId},messages:[],threads:[],jobs:[]};chatSignature='';rememberConversation();setContent('chat-messages','');setContent('thread-grid','');$('thread-area').hidden=true;$('chat-job-error').innerHTML='';await refresh();return createdId;}
+  async function sendQuestion(question){question=String(question||'').trim();if(!question||chatBusy||!chatAvailable()||chatIsRunning())return;const taskContext=context();chatBusy=true;renderChatStatus();try{const targetConversation=conversationId||await newConversation();await api('/api/actions',{action:'chat_send',conversation:targetConversation,question,context:taskContext});$('chat-question').value='';await refresh();await refreshChat();$('chat-body').scrollTop=$('chat-body').scrollHeight;}catch(error){$('chat-job-error').innerHTML='<div class="chat-error">'+esc(error.message)+'</div>';toast(error.message);}finally{chatBusy=false;renderChatStatus();}}
+  async function refresh(){if(refreshing)return;refreshing=true;try{state=await api('/api/state');$('connection').textContent='更新 '+time(state.time);$('live-indicator').innerHTML='<span class="dot good"></span>&nbsp; 现场更新';$('connection-error').style.display='none';renderBusiness();renderPractice();syncConversations();renderChatStatus();await refreshChat();}catch(error){$('connection').textContent='连接中断';$('live-indicator').textContent='连接中断';$('connection-error').textContent='暂时无法取得现场数据 · '+error.message;$('connection-error').style.display='block';}finally{refreshing=false;}}
+  async function openSession(source,id,item){try{const result=await api('/api/session?source='+encodeURIComponent(source)+'&session='+encodeURIComponent(id)+(item?'&item='+encodeURIComponent(item):''));$('evidence-title').textContent='执行证据 · '+short(result.session.id);$('evidence-content').innerHTML=(result.has_earlier_messages?'<p class="tiny muted">显示报告附近的最近 500 条记录。</p>':'')+result.messages.map(message=>'<div class="modal-message"><div class="mono">'+esc(message.role)+' · Item '+esc(message.id)+(message.tool_name?' · '+esc(message.tool_name):'')+'</div>'+(message.tool_calls?.length?'<pre>'+esc(pretty(message.tool_calls))+'</pre>':'')+'<pre>'+esc(message.content||'')+'</pre></div>').join('');if(!$('evidence-dialog').open)$('evidence-dialog').showModal();}catch(error){toast(error.message);}}
+  function openPractice(){if(!$('practice-drawer').open)$('practice-drawer').showModal();}
+  document.addEventListener('click',async event=>{const button=event.target.closest('button');if(!button)return;if(button.dataset.page)switchPage(button.dataset.page);if(button.dataset.close)$(button.dataset.close).close();if(button.dataset.stage){stage=Number(button.dataset.stage);renderPractice();}if(button.dataset.action)await action({action:button.dataset.action});if(button.dataset.inject)await action({action:'fault',instance:$('fault-instance').value,service:$('fault-service').value,mode:button.dataset.inject});if(button.dataset.serviceScope){$('service-filter').value=button.dataset.serviceScope;$('instance-filter').value=button.dataset.instanceScope;selectedIncident=null;switchPage('metrics');}if(button.dataset.incident){selectedIncident=selectedIncident===button.dataset.incident?null:button.dataset.incident;renderOverview();renderChatStatus();}if(button.dataset.investigate){selectedIncident=button.dataset.investigate;const item=incidentRecords().find(row=>key(row)===selectedIncident);if(item)await sendQuestion('请调查 '+instanceName(item.instance)+' 的 '+item.service+' 事故 '+item.incident_id+'，说明当前影响、依据、仍待确认的问题和恢复建议。');}if(button.dataset.recovery)await requestRecovery(incidentRecords().find(item=>key(item)===button.dataset.recovery));if(button.dataset.session)await openSession(button.dataset.source,button.dataset.session,button.dataset.item);if(button.dataset.recall)await action({action:'memory_recall',incident_id:button.dataset.recall});if(button.dataset.suggest)await sendQuestion(button.dataset.suggest);if(button.id==='offline-action'){if(state.agent.stages?.[0]?.implemented&&state.agent.status!=='running')await action({action:'agent_start'});else openPractice();}});
+  $('approve-recovery').onclick=approveRecovery;$('request-recovery').onclick=()=>requestRecovery(selectedRecoveryItem());
+  $('fault-instance').onchange=$('fault-service').onchange=renderRecoveryControls;
+  $('open-practice').onclick=openPractice;$('review-memory').onclick=()=>action({action:'memory_review'});$('check').onclick=()=>{$('check-details').open=true;return action({action:'check',stage});};
+  $('copy-prompt').onclick=async()=>{const text=prompts[stage-1]+'\n请先读取 workshop/capstone/lab/AGENTS.md，只完成这一步。在同一份 '+state.agent.implementation+' 中实现，自动运行对应的检查直到通过，检查证据保存到 '+state.root+'，然后告诉我回工作台观察什么。'+(state.agent.mode==='live'?'检查使用真实模型，并传入 --live。':'检查使用离线演示模式，不调用真实模型。')+(state.agent.model_env_file?'模型配置从 '+state.agent.model_env_file+' 读取，检查使用 --env-file，勿输出任何凭据。':'');try{await navigator.clipboard.writeText(text);toast('本步需求已复制');}catch{toast('复制失败，请从 repo 的逐关指南读取本步需求。');}};
+  $('instance-filter').onchange=$('service-filter').onchange=()=>{selectedIncident=null;renderBusiness();renderChatStatus();};$('log-search').oninput=$('log-level').onchange=renderLogs;
+  $('new-chat').onclick=async()=>{if(chatBusy)return;chatBusy=true;renderChatStatus();try{await newConversation();$('chat-question').focus();}catch(error){toast(error.message);}finally{chatBusy=false;renderChatStatus();}};
+  $('conversation-select').onchange=async()=>{if(chatBusy)return;pendingConversationId=null;conversationId=$('conversation-select').value||null;rememberConversation();chatData=null;chatSignature='';setContent('chat-messages','');$('thread-area').hidden=true;$('chat-job-error').innerHTML='';renderChatStatus();await refreshChat();};
+  $('chat-form').onsubmit=event=>{event.preventDefault();return sendQuestion($('chat-question').value);};$('chat-question').oninput=renderChatStatus;$('chat-question').onkeydown=event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendQuestion($('chat-question').value);}};
+  for(const id of ['practice-drawer','evidence-dialog','recovery-dialog'])$(id).addEventListener('click',event=>{if(event.target===$(id)){const box=$(id).getBoundingClientRect();if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)$(id).close();}});
+  refresh();setInterval(refresh,1800);
 </script>
 </body>
 </html>

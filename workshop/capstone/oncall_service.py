@@ -69,8 +69,8 @@ def start_process(stack, command, log):
 
 
 @contextmanager
-def client_proxy(root, alias, skills, options):
-    from skillclaw.api_server import SkillClawAPIServer
+def client_proxy(root, alias, skills, options, *, offline=False):
+    from skillclaw.api_server import SkillClawAPIServer, _llm_request_timeout_seconds
     from skillclaw.config import SkillClawConfig
 
     sys.path.insert(0, str(HERE.parents[1] / "examples"))
@@ -87,9 +87,16 @@ def client_proxy(root, alias, skills, options):
         record_dir=str(record_dir), sharing_enabled=True, sharing_upload_sessions=True,
         sharing_backend="local", sharing_local_root=str(root / "shared"),
         sharing_group_id=GROUP, sharing_user_alias=alias, sharing_skill_reload_mode="off",
+        sharing_session_upload_interval=1,
         validation_enabled=False, dashboard_enabled=False, max_context_tokens=64000,
     )
-    config.session_idle_close_seconds = 5
+    request_timeout = _llm_request_timeout_seconds()
+    if not math.isfinite(request_timeout):
+        raise ValueError("Use a finite SkillClaw upstream request timeout")
+    # Native idle tracking is touched when an upstream request starts, before
+    # its final response arrives. A short idle limit can archive an unfinished
+    # tool turn while a real model is still generating the report.
+    config.session_idle_close_seconds = 5 if offline else max(300, math.ceil(request_timeout) + 30)
     config.session_sweep_interval_seconds = 1
     proxy = SkillClawAPIServer(config)
     with structured_tool_status_compat():
@@ -368,7 +375,8 @@ def serve(root, live, implementation, *, environment_states=None, oncall=True, l
                         raise RuntimeError(f"{alias}: HTTP environment failed to start")
                     time.sleep(.1)
                 receiver = root / "receivers" / alias
-                proxy = stack.enter_context(client_proxy(root / "archives", alias, receiver, options))
+                proxy = stack.enter_context(client_proxy(root / "archives", alias, receiver, options,
+                                                         offline=not live))
                 worker = root / "patrols" / alias
                 worker.mkdir(parents=True)
                 command = [sys.executable, "-B", str(HERE / "patrol/patrol.py"), "--state", str(worker),

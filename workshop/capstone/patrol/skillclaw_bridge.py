@@ -82,16 +82,14 @@ def capture(root: Path, alias: str, skills_dir: Path, upstream_url: str,
 
 
 def _report(content):
-    if not isinstance(content, str):
-        return {}
-    text = content.strip()
-    if text.startswith("```") and text.endswith("```") and "\n" in text:
-        text = text.split("\n", 1)[1][:-3].strip()
+    # Keep archive selection and SessionDB validation on the same report
+    # contract. Import lazily because the patrol runtime also uses this bridge.
+    from patrol import decode_report
+
     try:
-        value = json.loads(text)
+        return decode_report(content)
     except ValueError:
         return {}
-    return value if isinstance(value, dict) else {}
 
 
 def incident_archive(root: Path, alias: str, session_id: str, *, group_id: str | None = None,

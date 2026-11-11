@@ -1,34 +1,62 @@
-# 综合实战｜在工作台逐步搭起 On-call Agent
+# 综合实战｜双实例 On-call Agent
 
-先把服务环境打开，再让 Agent 一步步上线。工作台起初只有两套业务环境，Agent 显示为离线。你在 Coding Agent 中逐关补全同一个 `lab/self_improvement_agent.py`，检查通过后回到网页应用代码，观察巡检、告警调查、Memory 和 Skill 学习怎样逐项接上。
+先按[运行双实例演练](#运行双实例演练)复现本讲。入口是 [self_improvement_agent.py](self_improvement_agent.py)：两套独立的本地 HTTP 环境、两个持续巡检的 Hermes，默认由脚本模型驱动，工具调用、服务探测和 SkillClaw 原生归档实际执行。
+
+双轮验收以 A 的支付服务（`instance-a/payments`）和 B 的订单服务（`instance-b/orders`）为目标。第一轮分别注入持续失败与间歇失败，第二轮交换故障类型。每套环境还保留其他演练服务，供日常巡检抽查。
+
+原始初判 Session 进入 SkillClaw；从报告 Item fork 的补查分支用于事故处置、恢复验证和后续复盘。候选在独立冻结的持续失败、间歇失败、首次成功未复现三个现场中，与现行版从新会话开始成对评测。通过后发布正式版本，再核对两端新任务实际读取的 Skill 与新增探测；采用未获证实时保留待验证状态，采用失败时回退。
+
+业务工作台提供这套系统新增的操作与观察入口，共用原有 Skill、巡检和演化主链。它默认连接真实模型，便于持续对话和业务复核；复现本讲的受控两轮流程使用上面的脚本模型入口。下面的四步练习逐项搭建同一套系统，最终仍需核对完整的两轮发布与采用记录。
 
 ## 启动本地工作台
 
-从仓库根目录运行。需要 Git、Bash，以及 Python 3.12 或 `uv`。安装脚本会准备课程固定版本的 Hermes 和 SkillClaw。默认由本机脚本模型驱动，HTTP 服务、Hermes 工具调用和会话记录实际运行。
+需要边操作边观察时，再打开工作台。两套业务环境先接收请求，右侧 SRE Agent 起初离线，完成接入后持续巡检。
+
+从仓库根目录运行。需要 Git、Bash，以及 Python 3.12 或 `uv`。安装脚本会准备课程固定版本的 Hermes 和 SkillClaw。工作台默认连接真实模型，先准备本地配置：
 
 ```bash
 bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
+cp -n workshop/capstone/.env.example .env
+```
+
+在仓库根目录的 `.env` 中填写 `GLM_API_KEY`。模板还提供 `GLM_MODEL` 和 `GLM_BASE_URL`，可以按自己的模型和端点调整。已有 `.env` 时只补齐这些字段。然后启动：
+
+```bash
 .deps/hermes-agent/.venv/bin/python -B workshop/capstone/app.py \
   --state workshop/capstone/runtime/workbench --port 8765
 ```
 
-打开终端给出的地址。先在「服务现场」确认两套环境已经有请求和指标，再查看 Agent 的离线状态。保持工作台运行，在仓库根目录打开 Codex、Claude Code 或其他 Coding Agent，按[逐关指南](lab/README.md)一次发送一关请求。
+直接查看完整参考系统时，在启动命令后加 `--solution`；默认使用 `lab/self_improvement_agent.py` 供逐步实现。
 
-每关检查通过后，回到工作台点击「启动 Agent」或「应用代码」，再按指南在面板里观察。当前实现始终保存在 `lab/self_improvement_agent.py`，每次修改都在这份文件上继续。检查会记录实际使用的实现路径、内容指纹和证据位置，并通过请求中的 `--workbench` 将结果带回同一工作台。
+工作台先使用当前进程中的模型配置，再读取仓库根目录或 `workshop/capstone/` 下的 `.env`。配置保存在其他本地文件时，可加 `--env-file /path/to/local.env`。不要把本地配置文件提交到仓库。
 
-| 阶段 | 你补的能力 | 回工作台看什么 |
-| --- | --- | --- |
-| 1 · 巡检上线 | `patrol_config` | 「服务现场」里的 Agent 上线和巡检检查点 |
-| 2 · 调查与交接 | 告警投递、会话分支、paging | 「事故与调查」里的工具证据、分支报告和人工交接 |
-| 3 · 跨会话 Memory | `recall_memory` | 「Memory」里的来源事实、新会话召回和当前现场核对 |
-| 4 · Skill 学习 | `release_policy` | 「Skill 学习」里的候选、成对评测、发布及采用状态 |
+打开终端给出的地址。先看「概览」中的服务状态，再到「指标」「日志」「变更」检查同一现场。指标和日志来自本机 HTTP 请求；变更记录的是实际发生的环境启动与故障配置调整。初始没有事故时，可以先看正常流量。
 
-工作台中的「运行本关检查」使用同一套检查器。Codex 会读取练习目录的 [AGENTS.md](lab/AGENTS.md)；使用其他 Coding Agent 时，也先让它读取并遵守这份规则。每完成一关，保留检查结果，再回面板亲自触发场景。
+保持工作台运行，从仓库根目录打开 Codex、Claude Code 或其他 Coding Agent，先发送这一句：
+
+> 先读取 workshop/capstone/lab/AGENTS.md。接下来帮我把 On-call Agent 接进工作台，每次只完成我当前提出的需求。
+
+随后按[逐步指南](lab/README.md)，一次交给它一个需求。它会实现同一份 `lab/self_improvement_agent.py`，自动运行检查并修正失败。你回到「练习与运行」，点击「启动 Agent」或「应用代码」，再去业务页面观察。
+
+右侧的「SRE Agent」在各个业务页面共用同一段对话。你可以边看指标、日志和变更边继续问它，也可以点击「新建对话」，检验下一次任务是否查到了已经积累的经验。调查过程中的工具调用和并行调查结果会随对话展示，原始会话可从「执行证据」打开。
+
+| 你交给 Coding Agent 的需求 | 回到工作台做什么 |
+| --- | --- |
+| 让 Agent 上线并持续巡检 | 看服务检查时间持续更新，问它现在有哪些异常 |
+| 让它接手告警、调查并通知我 | 制造故障，观察调查与交接，继续追问判断依据 |
+| 让它记住事故并在新任务中检索 | 复盘恢复后的事故，开一段新对话核对历史和当前状态 |
+| 让团队从事故改进 Skill，评测后在下一轮采用 | 看候选与成对评测，再用新事故检查实际采用 |
+
+「练习与运行」集中放置实现进度、检查记录、Agent 控制、故障注入与恢复申请。运行中的业务页面保留当前对话，你可以随时回到它们继续调查。每次检查会记录所用实现的内容指纹；修改后的代码需要重新通过检查并应用，才算进入当前运行。
+
+需要清除实验故障时，在已经完成工程师交接的事故上点击「申请恢复」，在「批准恢复」中核对绑定的事故、环境、服务和调查报告，再点「批准并执行本地恢复」。审批与执行分别留存回执，页面先进入「恢复验证中」，后续巡检确认两个独立健康窗口后才标为已恢复。
+
+仅核对安装与接线时，在启动命令后加 `--offline`。离线模式中的 HTTP、Hermes 工具和会话存储实际运行，模型回答由本机脚本提供，页面会标明该模式。自由问答使用默认的真实模型模式。检查与调查会保存各自的运行记录，真实模型与离线接线的结果分别记录。
 
 ## 完整参考运行
 
-需要直接复查完整系统时，可以运行 [self_improvement_agent.py](self_improvement_agent.py)。它提供已经接好的巡检、告警调查、工程师交接、会话归档、独立评测和 Skill 发布流程。下面保留命令行参考入口和扩展模块说明。
+[self_improvement_agent.py](self_improvement_agent.py) 是本讲完整参考系统的受控入口，负责两轮故障交换、巡检、调查交接、会话归档、独立评测、Skill 发布和新现场采用验证。持续对话和工作台中的附加复核沿用这些证据；完整验收按下面的两轮命令执行。
 
 | 你想观察什么 | 从哪里开始 | 运行到哪里 |
 | --- | --- | --- |
@@ -84,7 +112,7 @@ bash scripts/setup_skillclaw.sh
 
 演练收齐原生调查归档并确认恢复后，启动 Evolve Server。候选进入隔离的验证队列。业务回放使用独立的固定快照，分别核对持续失败、间歇失败和首次探测未复现。新版本只有在通过全部用例、且至少修复一个旧版失败时，才按验收哈希发布到正式 SkillHub。A、B 各自拉取，然后交换故障类型，在新的调查会话中再次读取 Skill。第二轮须核对两端的探测顺序和结论。任一端未证明新版行为，就恢复上一个批准版本。两份验证通过的经历继续进入演化。第二轮产出的合格候选留待下一次现场任务验证。
 
-默认使用本机脚本模型，无需 API key。Hermes 工具调用、HTTP 流量、SkillClaw 原生归档、演化与 SkillHub 同步实际运行。可选的 `--live` 使用已配置的 `GLM_API_KEY`、`GLM_MODEL` 与 `GLM_BASE_URL`，会产生模型请求。参考验收覆盖脚本模型路径，真实 GLM 的端到端验收待运行。
+默认使用本机脚本模型，无需 API key。Hermes 工具调用、HTTP 流量、SkillClaw 原生归档、演化与 SkillHub 同步实际运行。可选的 `--live` 使用已配置的 `GLM_API_KEY`、`GLM_MODEL` 与 `GLM_BASE_URL`，会产生模型请求。受控两轮的完整验收使用脚本模型；真实模型目前完成工作台前台、问答与 Memory 的部分联调，完整两轮尚未验收。
 
 验收时挑一条第二轮调查，从 `patrol-evidence.json` 核对初判读到的 Skill 哈希与两个 HTTP 探测回执，再回查第一轮的采用决定和逐题证据。沿同一事故的 `investigation.json` 检查父 Session、原报告 Item 和分支里的三次探测，然后核对审批引用、处置回执及两个恢复窗口。想亲手巡检、控制故障开关并开展分支调查，可先做[单实例巡检](patrol/LAB.md)与[故障注入和调查](patrol/ONCALL.md)。
 
@@ -139,7 +167,7 @@ ENV_SCRIPT=workshop/capstone/patrol/environment.py
 "$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-b" fault orders intermittent
 ```
 
-两起故障可以分别注入、分别处理。重新运行状态命令，从目标服务的 `last_incident.page_receipt` 找到 paging 记录。同目录的 `investigation.json` 是调查分支及恢复建议。对照 paging 时间和之后的巡检检查点，确认交接后巡检仍在推进，再关闭该环境的故障。持续模式中的故障清除由运行者执行。
+两起故障可以分别注入、分别处理。重新运行状态命令，从目标服务的 `last_incident.page_receipt` 找到 paging 记录。同目录的 `investigation.json` 是调查分支及恢复建议。对照 paging 时间和之后的巡检检查点，确认交接后巡检仍在推进，再关闭该环境的故障。下面是纯 CLI 持续模式中由运行者手动清除实验故障的命令；工作台使用前述申请与批准流程。
 
 ```bash
 "$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-a" fault payments off

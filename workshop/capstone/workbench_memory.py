@@ -22,18 +22,48 @@ from fleet import receipt, review_facts
 from implementation import load_implementation
 from investigation import followup_receipts
 from patrol import connect, decode_report, incidents, writer_lock
-from shared_facts import FACT_FIELDS, validate_fact
+from shared_facts import FACT_FIELDS, read_fact, validate_fact
 
 
 ALIASES = ("instance-a", "instance-b")
 
 
+def matches_publication(state, entry):
+    evidence = {key: entry[key] for key in FACT_FIELDS}
+    validate_fact(evidence)
+    scope = tuple(evidence[key] for key in ("incident_id", "service", "environment_id"))
+    return read_fact(Path(state["shared_store"]).resolve(), scope) == evidence
+
+
 def memory_state(root):
+    root = Path(root)
     path = root / "memory" / "state.json"
     if path.is_file():
-        return load_json(path)
-    return {"status": "empty", "facts": [], "recalls": [],
-            "shared_store": str(root / "memory" / "shared-facts.sqlite3")}
+        state = load_json(path)
+    else:
+        state = {"status": "empty", "facts": [], "recalls": [],
+                 "shared_store": str(root / "memory" / "shared-facts.sqlite3")}
+    reviews = state.setdefault("reviews", [])
+    # Older workbenches put a successful no-change decision in the fact index.
+    # Retain that review for idempotence without presenting its evidence as Memory.
+    published, unavailable = [], []
+    for entry in state["facts"]:
+        if entry.get("review_status") == "proposed":
+            try:
+                if matches_publication(state, entry):
+                    published.append(entry)
+                    continue
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
+                pass
+            unavailable.append(entry.get("incident_id", "unknown"))
+        if entry not in reviews:
+            reviews.append(entry)
+    state["facts"] = published
+    if unavailable:
+        state["last_error"] = "Published Memory fact is unavailable or changed: " + ", ".join(unavailable)
+    if state["status"] != "error":
+        state["status"] = "ready" if state["facts"] else "empty"
+    return state
 
 
 def save_state(root, state):
@@ -106,8 +136,12 @@ def review(workbench_root, run_root, environments, live=False, incident_id=None)
     memory.mkdir(parents=True, exist_ok=True)
     with writer_lock(memory, timeout=1):
         state = memory_state(root)
-        prior = {entry["incident_id"]: entry for entry in state["facts"]}
-        reviewed = []
+        # Completed keep decisions are reusable without publication. A proposal
+        # is reusable only while its exact fact remains in the shared store.
+        prior = {entry["incident_id"]: entry for entry in state["facts"] + [
+            item for item in state["reviews"] if item.get("review_status") == "keep"
+        ]}
+        reviewed, published, kept = [], [], []
         for alias in ALIASES:
             worker = run / "patrols" / alias
             if not (worker / "patrol.sqlite").is_file():
@@ -144,16 +178,26 @@ def review(workbench_root, run_root, environments, live=False, incident_id=None)
                         attempt.mkdir(parents=True)
                         entry = review_facts(attempt, {alias: proof}, {alias: recovered},
                                              Path(state["shared_store"]), live)[alias]
+                        if entry["status"] not in ("proposed", "keep"):
+                            raise ValueError("Memory review did not return a completed decision")
                         fact = {**entry["evidence"], "source_run": str(run),
                                 "review_status": entry["status"], "review_path": str(attempt)}
-                        state["facts"].append(fact)
+                        if entry["status"] == "proposed":
+                            if not matches_publication(state, fact):
+                                raise ValueError("Memory proposal was not published with the verified evidence")
+                            state["facts"].append(fact)
+                            published.append(record_id)
+                        else:
+                            kept.append(record_id)
+                        state["reviews"].append(fact)
                         prior[record_id] = fact
                         reviewed.append(record_id)
-                        state.update(status="ready", last_error=None)
+                        state.update(status="ready" if state["facts"] else "empty", last_error=None)
                         save_state(root, state)
         state["status"] = "ready" if state["facts"] else "empty"
         save_state(root, state)
         return {"status": state["status"], "reviewed": reviewed,
+                "published": published, "kept": kept,
                 "facts": len(state["facts"]), "state": str(memory / "state.json")}
 
 
@@ -161,10 +205,12 @@ def review_runs(workbench_root, environments, live=False, incident_id=None):
     """Review every persisted Agent run, including runs replaced by new implementations."""
     root = Path(workbench_root).resolve()
     runs = sorted(path.parent for path in (root / "runs").glob("*/service.json") if path.is_file())
-    reviewed = []
+    reviewed, published, kept = [], [], []
     for run in runs:
         result = review(root, run, environments, live, incident_id)
         reviewed.extend(result["reviewed"])
+        published.extend(result["published"])
+        kept.extend(result["kept"])
     memory = root / "memory"
     memory.mkdir(parents=True, exist_ok=True)
     with writer_lock(memory, timeout=1):
@@ -172,6 +218,7 @@ def review_runs(workbench_root, environments, live=False, incident_id=None):
         state.update(status="ready" if state["facts"] else "empty", last_error=None)
         save_state(root, state)
         return {"status": state["status"], "reviewed": reviewed,
+                "published": published, "kept": kept,
                 "facts": len(state["facts"]), "state": str(memory / "state.json"),
                 "runs": [str(run) for run in runs]}
 
