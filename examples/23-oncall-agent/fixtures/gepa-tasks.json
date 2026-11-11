@@ -1,0 +1,168 @@
+{
+  "schema": "lesson23-gepa-tasks-v1",
+  "origin": "Constructed connection-pool incidents for lesson 23",
+  "tasks": [
+    {
+      "id": "train-drift",
+      "incident_id": "lesson23-1-drift",
+      "split": "train",
+      "case": "drift",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-a"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 120
+        },
+        "query_pool_config": {
+          "max_connections": 120
+        },
+        "query_pool_effective": {
+          "max_connections": 60,
+          "active": 60,
+          "waiting_requests": 18
+        }
+      }
+    },
+    {
+      "id": "train-upstream",
+      "incident_id": "lesson23-1-upstream",
+      "split": "train",
+      "case": "upstream",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-b"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 1600
+        },
+        "query_pool_config": {
+          "max_connections": 120
+        },
+        "query_pool_effective": {
+          "max_connections": 60,
+          "active": 60,
+          "waiting_requests": 18
+        }
+      }
+    },
+    {
+      "id": "validation-drift",
+      "incident_id": "lesson23-2-drift",
+      "split": "validation",
+      "case": "drift",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-c"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 140
+        },
+        "query_pool_config": {
+          "max_connections": 160
+        },
+        "query_pool_effective": {
+          "max_connections": 80,
+          "active": 80,
+          "waiting_requests": 24
+        }
+      }
+    },
+    {
+      "id": "validation-upstream",
+      "incident_id": "lesson23-2-upstream",
+      "split": "validation",
+      "case": "upstream",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-d"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 1800
+        },
+        "query_pool_config": {
+          "max_connections": 160
+        },
+        "query_pool_effective": {
+          "max_connections": 80,
+          "active": 80,
+          "waiting_requests": 24
+        }
+      }
+    },
+    {
+      "id": "holdout-drift",
+      "incident_id": "lesson23-3-drift",
+      "split": "holdout",
+      "case": "drift",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-e"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 160
+        },
+        "query_pool_config": {
+          "max_connections": 200
+        },
+        "query_pool_effective": {
+          "max_connections": 100,
+          "active": 100,
+          "waiting_requests": 30
+        }
+      }
+    },
+    {
+      "id": "holdout-upstream",
+      "incident_id": "lesson23-3-upstream",
+      "split": "holdout",
+      "case": "upstream",
+      "scope": {
+        "service": "payment-api",
+        "environment": "lab",
+        "region": "zone-f"
+      },
+      "snapshot": {
+        "query_service_health": {
+          "healthy": true
+        },
+        "query_upstream_latency": {
+          "p95_ms": 2000
+        },
+        "query_pool_config": {
+          "max_connections": 200
+        },
+        "query_pool_effective": {
+          "max_connections": 100,
+          "active": 100,
+          "waiting_requests": 30
+        }
+      }
+    }
+  ]
+}

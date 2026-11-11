@@ -15,11 +15,17 @@ sys.path.insert(0, str(HERE.parent))
 
 from skillclaw_lab.runtime import install_signal_handlers, readonly_skill_toolset, save, sha
 from skillclaw_lab.observations import tool_events
-from scenario import SKILL, TOOLS, prompt, snapshots, validate_task
+from scenario import CONTEXT_TOOL, SKILL, TOOLS, prompt, snapshots, validate_scope, validate_task
 
 
 def content_sha(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def build_prompt(request, *, context_required):
+    """Expose the task scope and instructions, keeping dataset labels in audit only."""
+    return prompt(request["role"], request["case"], scope=validate_scope(request["scope"]),
+                  context_required=context_required)
 
 
 def main() -> None:
@@ -28,9 +34,7 @@ def main() -> None:
     case, role = request["case"], request["role"]
     if case not in ("drift", "upstream") or role not in ("source", "receiver"):
         raise ValueError("Use a lesson 23 case and source or receiver role")
-    scope = request["scope"]
-    if scope != {"service": "payment-api", "environment": "lab", "region": "local"}:
-        raise ValueError("The lesson task must use its own payment-api/lab/local scope")
+    scope = validate_scope(request["scope"])
     source = Path(request["skill"])
     if not source.is_absolute() or not source.is_file():
         raise ValueError("Use an existing absolute Skill file path")
@@ -85,12 +89,21 @@ curator:
     from run_agent import AIAgent
     from tools.registry import registry
 
-    snapshot = snapshots(case)
+    snapshot = snapshots(case, request.get("snapshot"))
     if set(snapshot) != set(TOOLS):
         raise ValueError("The scenario snapshot must define exactly this lesson's tools")
     save(directory / "snapshot.json", snapshot)
     calls = []
     calls_lock = threading.Lock()
+    context = None
+    bundle = None
+    context_mode = request.get("context_mode", "frozen")
+    if context_mode not in {"live", "frozen"}:
+        raise ValueError("Use live online retrieval or frozen evaluation context")
+    if request.get("context_file"):
+        from external_context import load_frozen_context
+        context_file = Path(request["context_file"])
+        bundle = load_frozen_context(context_file)
 
     def handler(name):
         def query(args, **_context):
@@ -112,6 +125,27 @@ curator:
                         "required": ["service", "environment", "region"], "additionalProperties": False}},
             handler=handler(name), override=True,
         )
+    if bundle is not None:
+        def context_handler(args, **_context):
+            nonlocal context
+            if args != scope:
+                return json.dumps({"error": "Context lookup scope mismatch"})
+            from external_context import live_read_context, read_context
+            returned = (live_read_context(bundle, scope["service"], scope["environment"])
+                        if context_mode == "live" else read_context(bundle, scope["service"], scope["environment"]))
+            context = {"backend": "openviking_live" if context_mode == "live" else "openviking_frozen_replay",
+                       "scope": scope, "bundle_sha256": sha(context_file), "context": returned}
+            save(directory / "context-receipt.json", context)
+            return json.dumps(context, ensure_ascii=False)
+
+        registry.register(
+            name=CONTEXT_TOOL, toolset="lesson23_snapshot", description="Retrieve the scope-matched external runbook; online uses native OpenViking and evaluation uses its frozen result",
+            schema={"name": CONTEXT_TOOL, "description": "Read an external runbook; not live telemetry.",
+                    "parameters": {"type": "object", "properties": {key: {"type": "string"} for key in scope},
+                                   "required": list(scope), "additionalProperties": False}},
+            handler=context_handler,
+            override=True,
+        )
     key = os.environ.get("GLM_API_KEY", "").strip()
     if not key:
         raise ValueError("Configure the task's explicit model connection before starting Hermes")
@@ -131,12 +165,14 @@ curator:
         elif before or database.get_session(session_id) is not None:
             raise ValueError("New tasks cannot append to a previously used Session")
 
-        allowed = {"skill_view", "skills_list", *TOOLS}
-        task_prompt = prompt(role, case)
+        allowed = {"skill_view", "skills_list", *TOOLS, *([CONTEXT_TOOL] if bundle is not None else [])}
+        # Dataset identifiers include split/case names; keep them in audit metadata,
+        # rather than revealing a scoring label to the Agent as part of its input.
+        task_prompt = build_prompt(request, context_required=bundle is not None)
         agent = AIAgent(
             model=request["model"], provider="custom", api_key=key, base_url=request["base_url"],
             api_mode="chat_completions", session_id=session_id, session_db=database,
-            max_iterations=10, max_tokens=2400,
+            max_iterations=12, max_tokens=2400,
             enabled_toolsets=[readonly_skill_toolset(), "lesson23_snapshot"],
             skip_memory=True, skip_context_files=True, save_trajectories=False, quiet_mode=True,
             load_soul_identity=False,
@@ -167,7 +203,10 @@ curator:
         loaded = any(isinstance(event["result"], dict) and event["result"].get("success") is True
                      and content_sha(event["result"].get("raw_content", event["result"].get("content", ""))) == expected_sha
                      for event in skill_reads)
-        evidence = validate_task(current_messages, calls, case, expected_sha)
+        evidence = validate_task(current_messages, calls, case, expected_sha, scope=scope,
+                                 frozen_snapshot=snapshot, expected_context=context)
+        if bundle is not None and context is None:
+            raise ValueError("The Agent did not retrieve the required external context")
         completed = bool(result.get("completed") and not result.get("failed") and not result.get("interrupted")
                          and loaded and sha(skill) == expected_sha and final and final["role"] == "assistant"
                          and not final.get("tool_calls") and final["content"] == result.get("final_response"))
@@ -183,6 +222,7 @@ curator:
             "calls": calls, "available_tools": list(TOOLS), "evidence": evidence,
             "checkpoint": checkpoint, "prior_message_count": len(before),
             "new_item_ids": [row["id"] for row in current_rows],
+            "task_id": request.get("task_id"), "split": request.get("split"), "context": context,
         })
         if not completed:
             raise RuntimeError("The native task did not complete with its pinned Skill and persisted report Item")

@@ -16,6 +16,7 @@ SUITES = {
     "Curator adoption": ("examples/17-curator/test_risks.py",),
     "Business grading": ("examples/18-business-eval/alert_selftest.py",),
     "Enterprise dataset": ("examples/19-enterprise-dataset/selftest.py",),
+    "Lesson 23 candidate handoff": ("examples/23-oncall-agent/test_run23.py",),
     "Workbench controls": ("-m", "unittest", "discover", "-s", "workshop/capstone", "-p", "test_workbench*.py"),
     "Capstone evidence": ("-m", "unittest", "discover", "-s", "workshop/capstone/patrol", "-p", "test_*.py"),
 }

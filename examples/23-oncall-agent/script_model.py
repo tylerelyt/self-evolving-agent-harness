@@ -7,7 +7,7 @@ import os
 from threading import Thread
 from uuid import uuid4
 
-from scenario import SCOPE, SKILL, report_for
+from scenario import CONTEXT_TOOL, SKILL, report_for
 
 
 def respond(messages):
@@ -22,17 +22,19 @@ def respond(messages):
             receipts[names[message["tool_call_id"]]] = json.loads(message["content"])
     if "skill_view" not in receipts:
         return "skill_view", {"name": SKILL}
+    if task.get("context_required") and CONTEXT_TOOL not in receipts:
+        return CONTEXT_TOOL, task["scope"]
     for tool in ("query_service_health", "query_upstream_latency"):
         if tool not in receipts:
-            return tool, SCOPE
+            return tool, task["scope"]
     skill = receipts["skill_view"]
     text = skill.get("raw_content", skill.get("content", ""))
     compare = task["extra_investigation"] or all(tool in text for tool in ("query_pool_config", "query_pool_effective"))
     if receipts["query_service_health"]["healthy"] and receipts["query_upstream_latency"]["p95_ms"] <= 1000 and compare:
         for tool in ("query_pool_config", "query_pool_effective"):
             if tool not in receipts:
-                return tool, SCOPE
-    return None, report_for({name: value for name, value in receipts.items() if name.startswith("query_")})
+                return tool, task["scope"]
+    return None, report_for({name: value for name, value in receipts.items() if name.startswith("query_")}, receipts.get(CONTEXT_TOOL))
 
 
 @contextmanager
