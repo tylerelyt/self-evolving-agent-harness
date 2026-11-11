@@ -52,7 +52,7 @@ def execute_task(directory, skill, case="drift", role="receiver", *, base_url=No
     return read(directory / "result.json")
 
 
-def collect(run, skill, *, alias="instance-a", role="source", client=None):
+def collect(run, skill, *, alias="instance-a", role="source", client=None, context_mode="live"):
     from skillclaw.api_server import SkillClawAPIServer
 
     client = client or run / "online" / alias
@@ -70,7 +70,7 @@ def collect(run, skill, *, alias="instance-a", role="source", client=None):
             if not proxy.wait_until_ready(30):
                 raise RuntimeError("Native Client Proxy did not become ready")
             result = execute_task(client / "task", skills / SKILL / "SKILL.md", role=role,
-                                  context_file=run / "external-context" / "external-context.json", context_mode="live",
+                                  context_file=run / "external-context" / "external-context.json", context_mode=context_mode,
                                   base_url=f"http://127.0.0.1:{port}/v1")
         finally:
             proxy.stop()
@@ -268,7 +268,7 @@ def learn(run):
     return result
 
 
-def restore_checkpoint(run, source):
+def restore_checkpoint(run, source, *, context_mode="live"):
     started = time.time()
     original = run / source["task"]
     restored = run / "continued" / "instance-a"
@@ -279,7 +279,7 @@ def restore_checkpoint(run, source):
     shutil.copyfile(original / "checkpoint.json", restored / "checkpoint.json")
     checkpoint = read(restored / "checkpoint.json")
     task = execute_task(restored, run / "formal" / SKILL / "SKILL.md", role="receiver", resume=True,
-                        context_file=run / "external-context" / "external-context.json", context_mode="live")
+                        context_file=run / "external-context" / "external-context.json", context_mode=context_mode)
     if (task["session_id"] != checkpoint["session_id"] or not task["resumed"]
             or task["report_item_id"] <= checkpoint["report_item_id"] or not task["prior_message_count"]):
         raise ValueError("Restored native Session did not continue beyond its saved report Item")

@@ -1,68 +1,137 @@
-# 第23讲：把候选、评测与下一轮任务接起来
+# 第23讲：分六步验证自进化组件的交接
 
-本讲练习的是组件之间的交接：Hermes 按需读取 OpenViking 上下文并留下执行经历，SkillClaw 与 GEPA 分别生成隔离候选，独立评测作出版本决定，在线实例继续使用正式版，新客户端同步后再留下新的经历。默认运行故意让每份候选各有一项评分不可用，正确结果是 `REJECT`。候选仍可查看，正式版继续服务。
+这一讲每次只推进一个验证步骤。你先观察正式版任务留下了什么，再生成隔离候选、运行新旧回放，观察一次评分故障后亲手修复，最后核对发布、原 Session 恢复和新客户端的实际行为。命令不会替你补跑前置步骤，也不会在当前步骤结束后继续下一步。
 
-这是第23讲自己的有限演练。输入是本目录定义的连接池只读快照和 `seed/timeout-triage`；输出写入一次独立运行目录。它没有启动双环境 HTTP 服务、持续巡检、告警、paging、审批恢复或工作台。那些属于单独的[综合实战](../../workshop/capstone/README.md)。
+这里使用本讲自己的值班手册、`timeout-triage` Skill 和连接池只读快照。它不启动持续巡检、告警、paging、审批恢复或业务工作台；完整业务系统在独立的[综合实战](../../workshop/capstone/README.md)。
 
-先按仓库根 README 准备固定版本 Hermes 与 SkillClaw，再从仓库根目录安装本讲的 GEPA 和独立 OpenViking 服务依赖：
+模型、反思、嵌入和摘要均由本机脚本提供，不调用付费 GLM。Hermes、SessionDB、OpenViking、SkillClaw、官方 GEPA 与 SkillHub 的相应程序和协议实际运行。它们验证组件交接与固定任务行为，不证明真实模型的学习质量。
+
+## 先建立可观察的起点
+
+按仓库根 README 准备固定版本 Hermes 和 SkillClaw，进入本目录：
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -m pip install -r examples/23-oncall-agent/requirements.txt
-.deps/hermes-agent/.venv/bin/python -B examples/23-oncall-agent/setup_openviking.py
 cd examples/23-oncall-agent
-bash run.sh --offline
-bash run.sh
+LESSON23_RUN=/tmp/lesson23-my-practice
+bash run.sh init --out "$LESSON23_RUN"
+bash run.sh status --run "$LESSON23_RUN"
 ```
 
-OpenViking 固定版本安装在本目录的 `runtime/openviking-deps/venv`，不依赖先运行其他讲。安装器不启动服务或调用模型；已有环境可用 `setup_openviking.py --check` 核对。GEPA 固定为 `0.0.27`。`run.sh` 只读预检这两项依赖，缺少时停止，不自动安装。
+`init` 只复制正式基线、建立状态与 `controls.json`，不执行任务、不启动服务。此时应看到 `completed: []`、`next_step: 1`；目录里还没有执行经历、候选、回放或新客户端。已有目录不覆盖，重做整个练习时换一个新目录。
 
-`--offline` 只检查发布门槛与回执校验，不请求模型。`bash run.sh` 运行本讲完整参考：Hermes、原生 `skill_view`、SessionDB、OpenViking、SkillClaw Client Proxy、Evolve Server、官方 GEPA 优化器和 SkillHub 实际执行。模型、反思、嵌入和摘要均使用本机脚本响应，不需要密钥，也不调用 GLM；这证明框架接线和证据链，不证明真实模型的学习质量。每次建立新的 `runtime/<时间>-<随机值>`，终端打印 `REPORT.md` 的路径；已有目录不覆盖。需要固定输出位置时使用 `bash run.sh --out /tmp/lesson23-first-run`，重跑时换一个新目录。
+直接运行 `bash run.sh` 只显示帮助。可以在任意一步退出终端，再用相同 `--run` 继续。依赖只在需要它的步骤检查；准备错误发生在执行前，不记作教学失败。
 
-## 跑完后看什么
+## 第1步：让正式版留下真实执行证据
 
-本次运行先在独立 OpenViking 空间中存入本讲值班手册。实例 A 读取正式 Skill 后，实际调用 `read_external_context`，由工具处理函数向原生 OpenViking 发出 `find` 和 `read`，留下资源 URI、内容 hash 和本次服务返回回执。随后才查询服务健康与上游延迟。手册是参考上下文，不是本次现场状态。
+目标是沿着 Session、报告 Item 和工具回执确认一次执行经历，区分外部手册与当前现场。先预测：配置文件写了 120、生效值只有 60，是否已经足够确认根因？
 
-这次任务还有一条明确的补查要求：前两项正常时，再比较配置文件与实例生效的连接池上限。工具实际返回配置值 120、生效值 60、等待请求 24。这些数值是教学构造；差异是观测，不能直接证明超时根因。补查要求也是显式输入，不能把它说成模型自主发现了新方法。
-
-Client Proxy 原样归档这段会话。后台进程在独立共享目录里调用原生 Evolve Server 的 Summarize、Aggregate、Execute，提出补齐参数对比的候选。摘要和修改回复同样由脚本模型提供，所以这次运行证明的是总装与证据链，不是模型的自主学习质量。原生 `validated` 路径只负责将内容放进候选区；本讲自己的统一评测门槛决定是否发布，不冒充原生 PRM 的验证结论。
-
-另一条后台路径运行官方 GEPA。它使用本讲自己的六道构造任务，按事故分为训练、验证、留出三组，每组各有一题配置漂移和一题上游异常，实例范围和参数也分别冻结。优化器实际调用独立 Hermes 任务取得轨迹，再根据训练反馈请求一次脚本反思，经小批对照和 Pareto 选择导出候选。留出题不会进入搜索，也不会用于反思。
-
-两个来源通过同一份候选交接记录进入统一评测。现行版与各候选分别在全新 Hermes Home 中回放那两道独立留出任务：一题需要比较配置与生效值，另一题上游已经异常，应结束初查、不追加连接池查询。每次对照都使用相同的冻结 OpenViking 内容、任务范围和现场数据，检查实际 Skill hash、工具参数、调用先后与返回结果。默认运行故意让各候选的第二题评分不可用，标为 `score_error`，既不算业务失败，也不能从剩余题的通过率推断可以发布。
-
-后台处理期间，实例 A 的 SessionDB 被备份到另一个目录，由新进程恢复同一个 Session，保留原报告 Item 并继续一次任务。实例 C 随后通过原生 SkillHub 拉取正式版，在新 Session 中实际读取该版本并执行。恢复后的 A 和新实例 C 都在自己的工具调用中重新查询原生 OpenViking；离线优化与评测才读取固定的上下文副本。C 的会话又经 Client Proxy 归档，作为下一批经历保留。本次不自动启动第二批演化，已处理的 Session 和下一批来源分开记录。快照恢复的是会话历史与固定 Skill，不是运行进程或已经发生的业务副作用。
-
-| 文件 | 应能核对的事实 |
-| --- | --- |
-| `context-manifest.json`、`external-context/native-receipts.json` | 原生 OpenViking 入库与检索结果、独立空间、冻结内容及来源 |
-| `online/instance-a/task/context-receipt.json`、`receiver/instance-c/task/context-receipt.json` | 在线 Agent 工具实际执行的 `find`、`read`，不同于离线冻结回放 |
-| `experience.json`、`experiences/*.json` | A 的来源实例、Session、报告 Item、原生归档与实际工具回执 |
-| `candidates.json`、`candidate-records/*.json` | 两个来源各自的候选 hash、父版本、执行依据、隔离文件与最终决定 |
-| `learning/native/summary.json` | 原生候选进入待验证区，未直接改正式版；本次关闭了 session judge |
-| `learning/gepa/dataset.json`、`selection.json` | 本讲独立的三组任务、官方优化结果、实际训练与验证 Session、候选选择；留出不参与搜索 |
-| `learning/evaluation.json`、`learning/evaluation/*.json` | 两个候选面对同一留出集；新旧独立 Session、实际 hash、相同上下文与现场指纹；PASS、FAIL、`score_error` 分开 |
-| `continued/instance-a/checkpoint.json`、`result.json` | 同一个 Session 从原报告后继续，原 Item 与 Skill hash 未变 |
-| `receiver/instance-c/task/result.json` | 新客户端实际读取正式版，不能只看文件拉取成功 |
-| `next-experience.json`、`learning/processed-sources.json` | 新执行进入后续材料，已处理来源有独立索引；本次不自动重跑下一批 |
-| `report.json`、`openviking-service/service.json` | 本轮决定、实际采用的来源、正式版 hash、原生服务退出与本机模型请求计数 |
-
-## 自己改一处，再检查
-
-先打开 `scenario.py` 中的 `decide`，找到“评分不可用时拒绝”的条件。尝试仅凭已经拿到的分数作决定，再运行 `bash run.sh --offline`：相关回归应当失败。恢复条件后，再检查候选通过更多用例、却仍有一项无法判断时，为什么不能放行。
-
-随后可以在新的运行目录中修复这次评分输入：
+本步需要原生 OpenViking。准备命令只安装本讲自己的服务环境，不启动服务或请求模型：
 
 ```bash
-bash run.sh --complete-scores
-bash run.sh --complete-scores --prefer-source gepa
+../../.deps/hermes-agent/.venv/bin/python -B setup_openviking.py
+bash run.sh step 1 --run "$LESSON23_RUN"
 ```
 
-第一条命令只移除明确注入的评分故障，继续使用相同题集、工具和门槛。只有候选修复旧版失败、原有正确行为没有回归、全部评分有效时，才按内容 hash 发布；实例 C 的新任务再检查实际读取与新增工具调用。如果两份候选都通过，默认选择 SkillClaw 来源，第二条命令则优先选择已经通过同一门槛的 GEPA 来源。每次只发布一份批准内容，不把另一个来源的通过记录冒充为已发布或已采用。
+原生 OpenViking 在独立空间存入本讲手册。A 读取正式 Skill，然后在 Agent 工具调用中实际执行 OpenViking `find/read`，再查询现场。本次任务明确补充了配置与生效值的对比要求；这是教学输入，不是自主发现方法的证明。工具返回的配置值 120、生效值 60、等待数 24 是构造数据，差异仍不能直接写成根因。
 
-它们是本讲的可选正向对照，不替代默认的拒绝路径。脚本响应可以验证调用链、版本治理和固定任务上的行为，不能据此证明真实模型会自主发现方法，或在未见业务上持续改善。
+查看 `steps/01-baseline.json`、`experience.json`、`online/instance-a/task/messages.json` 和 `context-receipt.json`：找到实际 Skill hash、报告 Item、手册 URI、原生检索回执和现场参数。Client Proxy 的原始归档保存在 `experiences/`。
 
-## 本讲的边界
+本步完成后 OpenViking 服务关闭，候选生成还没有开始。后续第2—6步使用此次检索内容的冻结副本，记录为 `frozen`；不能把这些回放说成再次实时查询了 OpenViking。
 
-本次实际运行 OpenViking、SkillClaw 和官方 GEPA，三者的数据与运行目录都属于本讲。现场仍是参数驱动的只读教学快照，不访问生产服务。OpenViking 手册与当前现场回执分开保存；GEPA 的验证结果与最终留出评测分开保存；两个生成来源的候选与真正发布的版本分开保存。服务退出后，在线检索不会继续可用，已冻结的离线证据仍可核查。
+## 第2步：生成候选，先不让它上场
 
-本目录验证的是一次有限总装，不是生产常驻部署，也没有实现无限自动演化。完整持续 On-call 系统仍由综合实战单独承担。
+目标是验证两种候选来源能交给同一套版本控制，同时正式版保持原内容。先预测：候选文件已经出现，是否意味着其他实例已经采用？
+
+只在本步准备官方 GEPA：
+
+```bash
+../../.deps/hermes-agent/.venv/bin/python -m pip install -r requirements.txt
+bash run.sh step 2 --run "$LESSON23_RUN"
+```
+
+SkillClaw 原生 Summarize、Aggregate、Execute 在隔离共享目录中生成候选；GEPA 使用本讲自己的训练和验证任务运行搜索、反思与选择。训练、验证、留出分别属于独立事故，地域标签不提示答案。留出题此时没有执行。
+
+查看 `steps/02-candidates.json`、`candidates.json`、`candidate-records/` 和 `learning/gepa/evaluations.json`。应有两个来源的候选记录，状态仍是 `pending_evaluation`；GEPA 的实际 Session 仅属于训练和验证，`holdout_executed` 为 false，正式 hash 保持不变。原生 `validated` 在此只将 SkillClaw 候选排入隔离区；独立门槛稍后决定发布，不冒充原生 PRM 的判定。
+
+候选记录保存的是生成时快照。之后的拒绝、批准和发布记录在相应 `steps/` 文件中，不会回写这份来源证据。
+
+## 第3步：只运行新旧独立回放
+
+目标是在相同题面、工具、现场和外部上下文下取得可比较证据。先预测：上游已经异常时，新规则是否还应该继续查询连接池？
+
+```bash
+bash run.sh step 3 --run "$LESSON23_RUN"
+```
+
+两份候选分别与基线比较，共运行八个全新 Hermes Session。两道留出题分别检验配置对比和原有上游异常分支。它们没有进入 GEPA 搜索。
+
+查看 `steps/03-replay.json` 与 `learning/replay/` 中的实际消息和回执。核对同一道题的新旧 `snapshot_sha256`、`context_sha256` 和范围一致，Session 不同，实际读取 hash 分别对应基线与候选。比较查询顺序与最终报告，不用一句“已完成”替代工具证据。
+
+这一步保存原始轨迹和行为检查，不分配评分可用性、不作发布决定。输出应为 `scores_assigned: false`、`publication_decided: false`。正式版仍没有改变。
+
+## 第4步：评分缺失时拒绝，原版继续执行
+
+目标是区分业务失败与无法评分，并确认后台失败不会阻止正式版执行。先预测：剩余的有效评分看起来更好，能否据此跳过缺失项发布？
+
+```bash
+bash run.sh step 4 --run "$LESSON23_RUN"
+```
+
+`controls.json` 初始的 `score_outage: true` 模拟候选上游题的评分不可用。系统只对第3步的同一批轨迹赋分，两份候选均应 `REJECT / unjudgeable_cases`；`score_error` 的 `passed` 是 null，不作为业务失败或通过率中的成功项。
+
+拒绝后还会另开一个真实 Hermes Session，让保留版执行与第3步相同的配置漂移题。查看 `steps/04-reject.json` 和 `rejection/retained-version/task/`：这个任务应实际读取旧 hash，取得两项原有查询回执。正式版继续是执行证据，不只是文件没有变化。
+
+## 第5步：只修复评分输入，再决定和发布
+
+目标是只改变一个变量，观察发布判断为何改变。先说明你的预测，再运行：
+
+```bash
+bash run.sh scoring --run "$LESSON23_RUN" --available
+bash run.sh step 5 --run "$LESSON23_RUN"
+```
+
+第一条命令只把 `controls.json` 中的 `score_outage` 改成 false；也可以让 Coding Agent 只改这个字段。不要改 Skill、题包、原始轨迹、预期结果或第4步文件。
+
+第5步不再调用模型。它重新核对候选内容、父版本、题包、上下文及原生证据 hash，再使用第3步同一批轨迹恢复评分。如果候选修复了旧版失败、没有回归且全部评分有效，才按内容 hash 通过原生 SkillHub 发布一份批准内容。默认优先选择已经通过门槛的 GEPA 来源；另一来源通过不等于它也被发布。
+
+查看 `steps/05-publish.json`：`raw_replay_sha256` 应与第4步相同，`model_tasks_executed` 应为 0。第4步原 `REJECT` 文件仍保留原字节。共享正式入口已经更新，但这里还不能声称新客户端实际采用。
+
+## 第6步：核对旧 Session 与新客户端各用哪版
+
+目标是分别验证任务内版本固定、会话恢复和新实例采用。先预测：已经开始的 A 是否应该因为共享库更新而突然换方法？
+
+```bash
+bash run.sh step 6 --run "$LESSON23_RUN"
+bash run.sh status --run "$LESSON23_RUN"
+```
+
+原 A 的 SessionDB 备份到另一个目录，由新进程从原报告 Item 后继续；它仍固定原 Skill。C 则通过原生 SkillHub 拉取当前正式版，在新 Session 中实际读取批准 hash、执行新增的配置查询，并经 Client Proxy 归档新经历。两者都使用第1步冻结下来的外部上下文，不重启 OpenViking。
+
+查看 `steps/06-adopt.json`、`continued/instance-a/result.json`、`receiver/instance-c/task/result.json` 和 `next-experience.json`。A 应保持原 Session 与旧 hash，并增加新的报告 Item；C 应是新 Session、读取批准 hash，并实际执行四项现场查询。文件同步、会话加载和行为改变分别核对。本练习停在新经历归档处，不会自动启动下一轮演化。
+
+## 暂停、重跑和复位
+
+每一步是独立进程。`status` 读取进度；重复已经完成的命令先核对证据，再返回 `already_complete`，不重跑模型、搜索或发布。越关会拒绝，程序不会替你补跑缺失步骤。源码题包或证据被改变时也会在执行前拒绝；这不等于目标能力已经完成。
+
+若当前步骤执行失败，原始产物保留，显式复位后再试：
+
+```bash
+bash run.sh reset --run "$LESSON23_RUN" --from-step 3
+```
+
+这会归档第3步及后续产物，保留第1—2步；若已经发布，会通过本练习自己的 SkillHub 组实际恢复基线，再退回第3步。评分故障重新开启，下一次回放将建立新的独立 Session。只想重新验证采用时，从第6步复位，会保留第5步批准版本。
+
+复位旧证据保存在本练习的 `archive/`，不删除其他 run、外部资源或 OpenViking 依赖环境。reference 目录、错误标记或指向外部的软链接不接受为复位目标。不要通过修改评分预期绕过失败；若要使用新题包，另建练习目录。
+
+## 完整参考与检查
+
+一键完整流程保留给实现对照，必须明确指定 `--reference`，并使用另一个目录：
+
+```bash
+bash run.sh --reference --out /tmp/lesson23-reference
+bash run.sh --offline
+```
+
+reference 会一次跑完整链，A、恢复后的 A、C 均实际查询 OpenViking；它不代替上面的六步学习入口。reference 与分步目录不混用。`--offline` 运行发布门槛、分步守卫及复位回归，不调用模型；其中真实 SkillHub 发布与恢复检查需要固定的 native 依赖。没有这些依赖的标准库检查会明确跳过对应项，不能视为 native 发布验收。
+
+源码中，`steps.py` 只负责本练习的阶段边界；实际执行复用 `run23.py`、`task_worker.py`、`external_context.py` 与 `gepa_search.py`。如果让 Coding Agent 协助验证，要求它只推进你当前指定的一步，带你回看该步的 Session、Item 和参数；不要让它先跑完完整参考，再把结果当成你逐步验证过了。
