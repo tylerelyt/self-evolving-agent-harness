@@ -67,7 +67,7 @@ def run_replay(state, skill, options, snapshot, statuses):
     extra_requests = 0
     probe_lock = Lock()
 
-    def probe(_state, service):
+    def probe(_state, service, *, environment_id=None):
         nonlocal extra_requests
         with probe_lock:
             if len(served) == len(statuses):

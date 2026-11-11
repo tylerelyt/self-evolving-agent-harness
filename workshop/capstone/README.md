@@ -1,15 +1,15 @@
-# 第 23 讲配套大作业｜双实例巡检与故障处理
+# 综合实战参考实现｜双实例 On-call 与 Skill 改进
 
 这个项目让多个 Hermes Agent 同时巡检各自负责的范围。它们将各自的调查会话交给同一个 SkillClaw 共享组，汇集证据形成 Skill 候选。通过对照评测的版本再同步给巡检实例，由下一轮任务验证是否真正用上。
 
-第一次做大作业，先从[四关动手实作](lab/README.md)开始。现场和巡检已经能跑，你只需依次补上告警投递、分支调查、值班交接和候选放行。每关用实际 Hermes 回执验收，前三关完成后能带着自己写的代码持续值守。
+主入口是 [self_improvement_agent.py](self_improvement_agent.py)，提供已经接好的巡检、告警调查、工程师交接、会话归档、独立评测和 Skill 发布流程。安装课程固定依赖后，可以直接运行参考实现。
 
-先选一种跑法。下面的命令都用本机脚本模型，无需 API key。
+默认使用本机脚本模型，无需 API key。添加 `--live` 后使用配置好的真实模型端点。两种模式都通过 Hermes 执行工具，访问本地 HTTP 服务。
 
 | 你想观察什么 | 从哪里开始 | 运行到哪里 |
 | --- | --- | --- |
-| 自己触发一次故障，观察一个 Hermes 如何从巡检转入调查，再回到巡检 | [手动持续值守](#手动持续值守) | 故障由你打开和关闭。巡检持续到你按 Ctrl-C |
-| 看两个 Hermes 怎样用各自的事故经历改进同一份 Skill | [运行双实例演练](#运行双实例演练) | 脚本自动注入故障、演练恢复并核对版本采用。两轮完成后退出 |
+| 持续运行两个 Hermes，手动注入故障，观察独立交接与后台学习 | [双实例持续值守](#双实例持续值守) | 启动两套环境、两个 Agent 和 Client Proxy，持续到按 Ctrl-C |
+| 自动验证故障处理、跨实例学习、发布和实际采用 | [运行双实例演练](#运行双实例演练) | 自动注入故障、模拟授权恢复并核对版本采用，两轮完成后退出 |
 
 [课程总装方案与第 10—23 讲计划验收项](INTEGRATION-PLAN.md)
 
@@ -17,9 +17,9 @@
 
 | 阶段 | 要交付的能力 | 实作状态 |
 | --- | --- | --- |
-| 一 · 持续巡检 | 定时抽查、按需检索、从服务检查点恢复和 fork | [文章与可运行实现](patrol/README.md) |
+| 一 · 持续巡检 | 定时抽查、按需检索、从服务检查点恢复和 fork | [巡检模块](patrol/README.md) |
 | 二 · On-call 调查与处置 | 向正在运行的 Hermes 投递告警，从事故报告 fork 补查，审批处置并确认恢复 | [故障注入与调查实作](patrol/ONCALL.md) |
-| 三 · 从值守中改进 | 聚合多实例会话，回放评测、发布并验证两端采用 | [双实例演练入口](patrol/fleet.py) |
+| 三 · 从值守中改进 | 聚合多实例会话，回放评测、发布并验证后续采用 | [完整实现](self_improvement_agent.py) |
 
 ## 运行双实例演练
 
@@ -30,7 +30,7 @@
 ```bash
 bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/fleet.py \
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/self_improvement_agent.py \
   --out workshop/capstone/runtime/fleet-demo
 ```
 
@@ -44,11 +44,13 @@ bash scripts/setup_skillclaw.sh
 2. 打开 `report.json`，看 `status` 是否为 `complete`，再读第一轮的 `decision`。若发布了候选，对照第二轮的 `adoption_verified`。
 3. 回到 `round-2/collection/patrol-evidence.json`，选一个实例，对照它实际读取的 Skill 哈希和探测回执。由这条记录判断新一轮用到了什么。
 
+演化或评测异常会在 `learning_errors` 中留下原因，本轮最终状态保留为 `learning_failed`。正式版本保留或恢复完成后，巡检继续运行，受控演练仍可收集下一轮事故证据。若部分发布后的恢复未完成，编排器停止追加故障并保留已有证据。完整成功审计会将这类运行判为未完成。
+
 ### 演练各阶段与完整证据
 
-实验环境模拟告警日志监控服务，注入故障后发出带事故 ID 的告警。Harness 收到告警后，通过 steer 将原始事件交给当前巡检回合。Hermes 读取获准的 `oncall-alert-triage` Skill，按它完成初判、补查和交接。初判落盘后，Hermes 从事故报告 Item fork，重新读取同一版 Skill，给出调查结论和恢复方案。方案及源 Session、报告 Item 写入实验内的值班收件箱，并在终端显示通知。收到这份交接回执后，原巡检进程继续检查服务。每轮进入 SkillClaw 的是两个由 Client Proxy 归档的初判会话。
+实验环境模拟告警日志监控服务，注入故障后发出带事故 ID 的告警。Harness 收到告警后，通过 steer 将原始事件交给当前巡检回合。Hermes 读取获准的 `oncall-alert-triage` Skill，按它完成初判、补查和交接。初判落盘后，Hermes 从事故报告 Item fork，重新读取同一版 Skill，给出调查结论和恢复方案。方案及源 Session、报告 Item 写入实验内的工程师通知记录，并在终端显示通知。收到这份交接回执后，原巡检进程继续检查服务。每轮进入 SkillClaw 的是两个由 Client Proxy 归档的初判会话。
 
-通知后的实验处置由状态机控制。脚本模拟值班员 `lab-oncall-approver` 的批准，每份批准绑定事故 ID、环境、服务和清除本地故障的动作。处置后，两边各取得两个互不重叠、5xx 为零的 30 秒窗口才关闭事故，再把恢复检查点关联回巡检库。两个进程贯穿两轮演练，等待恢复窗口约需两分钟。
+通知后的实验处置由状态机控制。脚本模拟值班工程师 `lab-oncall-approver` 的批准，每份批准绑定事故 ID、环境、服务和清除本地故障的动作。处置后，两边各取得两个互不重叠、5xx 为零的 30 秒窗口才关闭事故，再把恢复检查点关联回巡检库。两个进程贯穿两轮演练，等待恢复窗口约需两分钟。
 
 每轮事故关闭后，编排器把已保存的探测与恢复证据交给隔离的 Hermes Background Review。复盘可以保留原状，也可以在自己的 Home 里提出历史事实。编排器逐字段核对来源与回执，再写入共享 SQLite。第二轮注入故障前，A 与 B 各开一个空会话接班，通过 `memory_lookup` 查询对方上一轮的事故，再用 `service_snapshot` 读取当前环境。历史事实提供当时发生了什么，当前状态由这一次 HTTP 指标决定。
 
@@ -68,7 +70,7 @@ bash scripts/setup_skillclaw.sh
 | `round-*/collection/patrol-evidence.json` | 两端的事故、Skill 实际读取、初判探测和各实例的 `investigation` 记录 |
 | `round-*/collection/<实例>/alert.json` | 监控替身发出的原始告警，含事故 ID、服务、环境和发送时间 |
 | `round-*/collection/<实例>/investigation.json` | 长调查的父 Session、报告 Item、分支 Session、三次新探测和报告，也是本轮处置依据 |
-| `round-*/collection/<实例>/page.json` | 本地值班收件箱回执，含事故范围、调查结论、恢复方案和分支报告 Item |
+| `round-*/collection/<实例>/page.json` | 本地 paging 回执，含事故范围、调查结论、恢复方案和分支报告 Item |
 | `round-*/patrol-loop.json` | 注入前的健康检查点、通知后恢复的检查点、关闭后关联回巡检库的恢复检查点 |
 | `round-*/incident-lifecycle.json` | 事故范围、批准与实际故障开关回执、两个恢复窗口和关闭记录 |
 | `round-*/fact-review/<实例>/proposal.json` | 隔离复盘的候选事实、来源证据哈希和本地写入结果 |
@@ -82,64 +84,69 @@ bash scripts/setup_skillclaw.sh
 | `round-*/recovery.json` | 两端关闭事故时的最终恢复窗口 |
 | `http-workset.json` | 完成演练后生成的 HTTP 工作样本，每起事故一条 |
 
-## 手动持续值守
+## 双实例持续值守
 
-从仓库根目录打开三个终端。需要 Git、Bash，以及 Python 3.12 或 `uv`。终端 A 会创建本轮独立的状态目录，再在里面启动四个本机 HTTP 服务和模拟流量。
+从仓库根目录运行。这个入口自行启动两套 HTTP 环境、两个 Hermes 巡检进程和各自的 SkillClaw Client Proxy。先完成上面的依赖安装，再选择一个新的 `--out` 目录。
 
 ```bash
-bash scripts/setup_deps.sh
-mkdir -p workshop/capstone/runtime
-PATROL_STATE=$(mktemp -d workshop/capstone/runtime/manual.XXXXXX)
-printf '本轮巡检目录 %s\n' "$PATROL_STATE"
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
-  --state "$PATROL_STATE" serve
+PY=.deps/hermes-agent/.venv/bin/python
+RUN=workshop/capstone/runtime/oncall-service
+"$PY" -B workshop/capstone/self_improvement_agent.py --out "$RUN" --serve
 ```
 
-终端 A 打印服务地址后，把它给出的巡检目录粘贴到终端 B 的提示里。先确认 `environment.status` 为 `ready`，再启动巡检。默认每轮抽查两个服务，每轮结束后间隔 5 秒。巡检会持续到按 Ctrl-C 为止。
+保持这个终端运行。两个实例各自轮巡独立环境里的订单、支付、库存和通知四个服务。下面用 A 的支付服务和 B 的订单服务作为故障目标。等待两端各自留下健康检查点，再从另一个终端向环境注入故障。注入程序修改本地环境的故障状态，环境监控观察请求失败并发出带事故 ID 的告警，Harness 将原始告警交给 Hermes。两个实例各自调查、从初判报告 fork 补查、page 值班工程师，然后继续巡检。
+
+用只读状态命令核对首次健康巡检。`services.payments.checkpoint` 应有 Session 和报告 Item，`matches_environment` 应为 `true`。把两处 `instance-a` 换成 `instance-b`，可以同样检查订单实例。
 
 ```bash
-printf '本轮巡检目录 '
-IFS= read -r PATROL_STATE
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
-  --state "$PATROL_STATE" status
-```
-
-```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
-  --state "$PATROL_STATE" run --oncall --page-oncall --interval 5 --offline
-```
-
-终端 C 使用同一目录。等 `services.payments.checkpoint.status` 为 `healthy`，并确认 `matches_environment` 为 `true`，再打开故障。`live` 字段来自当前 HTTP 遥测，`checkpoint` 来自已提交的巡检。两者分开看，可以确认 Agent 已经用这次环境的数据完成过一轮任务。
-
-```bash
-printf '本轮巡检目录 '
-IFS= read -r PATROL_STATE
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
-  --state "$PATROL_STATE" status
+PY=.deps/hermes-agent/.venv/bin/python
+RUN=workshop/capstone/runtime/oncall-service
+"$PY" -B workshop/capstone/patrol/patrol.py \
+  --state "$RUN/patrols/instance-a" status \
+  --environment-state "$RUN/environments/instance-a"
 ```
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
-  --state "$PATROL_STATE" fault payments on
+PY=.deps/hermes-agent/.venv/bin/python
+RUN=workshop/capstone/runtime/oncall-service
+ENV_SCRIPT=workshop/capstone/patrol/environment.py
+
+"$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-a" fault payments on
+"$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-b" fault orders intermittent
 ```
 
-终端 B 会出现值班提示。重新运行 `status`，从 `services.payments.last_incident.page_receipt` 找到通知，同目录的 `investigation.json` 是分支报告。巡检接着运行。读完恢复方案，在终端 C 关闭故障，再检查事故记录。
+两起故障可以分别注入、分别处理。重新运行状态命令，从目标服务的 `last_incident.page_receipt` 找到 paging 记录。同目录的 `investigation.json` 是调查分支及恢复建议。对照 paging 时间和之后的巡检检查点，确认交接后巡检仍在推进，再关闭该环境的故障。持续模式中的故障清除由运行者执行。
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py \
-  --state "$PATROL_STATE" fault payments off
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/patrol.py \
-  --state "$PATROL_STATE" status
+"$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-a" fault payments off
+"$PY" -B "$ENV_SCRIPT" --state "$RUN/environments/instance-b" fault orders off
 ```
 
-巡检观察到两个互不重叠的 30 秒健康窗口后，会在 `last_incident` 里留下 `recovered_inspection_id`。等待期间可以重复运行 `status`。它只读取 HTTP 指标和已经落盘的记录，输出里的 Session 和 Item 可以用来核对原始会话。结束时先停止终端 B 的巡检，再停止终端 A 的服务，本轮记录仍在独立目录里。检查点和会话分支的用法见[巡检实作](patrol/LAB.md)。
+巡检会继续核对恢复窗口。后台从已经恢复的事故中选取归档，按批次运行 SkillClaw 演化和独立回放。候选经过评测后才允许发布，后续新事故用实际加载的哈希和工具行为验证采用。没有新事故时，报告保留尚待采用验证的状态。候选保留、拒绝或学习异常都应从对应记录核对。
+
+| 持续模式记录 | 查看什么 |
+| --- | --- |
+| `service.json` | 环境与巡检进程、学习进程及服务状态 |
+| `patrols/<实例>/patrol.sqlite` | 巡检检查点、事故与恢复记录 |
+| `patrols/<实例>/pages/<事故 ID>/page.json` | 发给值班工程师的通知、调查结论和恢复建议 |
+| `patrols/<实例>/pages/<事故 ID>/investigation.json` | 源 Session、报告 Item、调查分支和新增探测 |
+| `learning/state.json` | 当前正式哈希、最近一批的结果、发布后是否等待采用验证 |
+| `learning/batches/<批次>/attempt-<次数>/result.json` | 两份来源会话、演化结果、独立评测和发布决定 |
+
+学习批次要求两个实例都有已恢复、已归档且使用同一版正式 Skill 的事故。只完成一个实例的事故时，前台继续巡检，后台等待另一份合格经历。`last_release.status` 为 `awaiting_adoption` 表示已经发布，后续两端的新事故仍需证明采用；确认两端行为后才成为 `adopted`，触发恢复时记为 `rolled_back`。
+
+要检验新版，等当前故障恢复、发布记录就绪后，再向任一责任服务注入新故障。可以交换持续失败和间歇失败，让两个实例面对不同于上一批次的现场。按 Ctrl-C 停止服务，已有记录保留在本次 `--out` 目录中。持续模式的后台学习需要恢复事故形成批次，是否发布以及是否完成采用验证由实际记录决定。
+
+真实模型运行使用同一入口，加 `--live` 并设置 `GLM_API_KEY`。可选的 `GLM_MODEL` 和 `GLM_BASE_URL` 控制模型与端点。首次核对接线可以先运行默认脚本模型。旧的 `patrol/fleet.py` 入口继续接受原参数，默认委托同一个完整实现。
+
+持续模式覆盖核心值守与后台学习。Memory 迁移、恢复复核 Skill、GEPA、OpenViking 和 Langfuse 等综合能力通过受控双轮演练验证。`--serve` 与 `--gepa`、`--enterprise`、`--langfuse`、`--openviking`、`--rehearse-rollback` 分别运行，CLI 会拒绝将持续模式与这些受控演练参数混用。
 
 ## 用 OpenViking 做跨实例交班
 
-先按第 14 讲启动原生 OpenViking 服务。在运行大作业的终端设置 `OPENVIKING_ENDPOINT`，指向服务的回环根地址，并设置同一授权范围的 `OPENVIKING_ACCOUNT` 和 `OPENVIKING_USER`。启用鉴权的服务还需设置 `OPENVIKING_API_KEY`。资料索引与检索会用到服务配置的模型。[第 14 讲服务启动](../../examples/14-external-memory-provider/OPENVIKING.md#运行原生-openviking)
+先按第 14 讲启动原生 OpenViking 服务。在运行参考实现的终端设置 `OPENVIKING_ENDPOINT`，指向服务的回环根地址，并设置同一授权范围的 `OPENVIKING_ACCOUNT` 和 `OPENVIKING_USER`。启用鉴权的服务还需设置 `OPENVIKING_API_KEY`。资料索引与检索会用到服务配置的模型。[第 14 讲服务启动](../../examples/14-external-memory-provider/OPENVIKING.md#运行原生-openviking)
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/fleet.py \
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/self_improvement_agent.py \
   --out workshop/capstone/runtime/fleet-openviking --openviking
 ```
 
@@ -154,7 +161,7 @@ IFS= read -r PATROL_STATE
 完成前面的依赖安装后，用新目录运行。
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/fleet.py \
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/self_improvement_agent.py \
   --out workshop/capstone/runtime/fleet-enterprise --enterprise
 ```
 
@@ -214,7 +221,7 @@ PY=.deps/hermes-agent/.venv/bin/python
 LF=examples/19-enterprise-dataset/.deps/sdk/bin/python
 RUN=workshop/capstone/runtime/fleet-langfuse
 "$PY" -B examples/19-enterprise-dataset/setup.py --langfuse
-"$PY" -B workshop/capstone/patrol/fleet.py \
+"$PY" -B workshop/capstone/self_improvement_agent.py \
   --out "$RUN" --enterprise --langfuse
 ```
 
@@ -246,7 +253,7 @@ else
   "$PY" -m pip install -r "$REQ"
 fi
 
-"$PY" -B workshop/capstone/patrol/fleet.py \
+"$PY" -B workshop/capstone/self_improvement_agent.py \
   --out workshop/capstone/runtime/fleet-gepa --gepa
 ```
 
@@ -263,7 +270,7 @@ fi
 用新的运行目录开启回退演练。
 
 ```bash
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/fleet.py \
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/self_improvement_agent.py \
   --out workshop/capstone/runtime/fleet-rollback --rehearse-rollback
 ```
 

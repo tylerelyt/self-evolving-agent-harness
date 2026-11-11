@@ -1,6 +1,7 @@
 """Regression checks for local telemetry and fault ownership."""
 
 from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -9,7 +10,8 @@ from threading import Thread
 import unittest
 from unittest.mock import patch
 
-from environment import get_snapshot, get_telemetry, probe_service, write_json
+from environment import (alert_event, get_snapshot, get_telemetry, monitor_alerts, probe_service,
+                         publish_alert, read_alert, write_json)
 from fleet import set_faults
 
 
@@ -21,6 +23,73 @@ class EnvironmentTests(unittest.TestCase):
 
     def endpoint(self, address):
         write_json(self.state / "environment.json", {"payments": address})
+
+    def alert(self, suffix, emitted_at, environment="current"):
+        return {**alert_event({"service": "payments", "environment_id": environment}, emitted_at=emitted_at),
+                "incident_id": f"lab-payments-{suffix:012x}"}
+
+    def test_pending_events_survive_newer_incidents_and_filter_their_scope(self):
+        old_environment = self.alert(1, 1, "previous")
+        first = self.alert(2, 2)
+        second = self.alert(3, 3)
+        for event in (old_environment, first, second):
+            publish_alert(self.state, event)
+
+        self.assertEqual(read_alert(self.state, "payments"), second)
+        self.assertEqual(read_alert(self.state, "payments", seen_ids=set(), environment_id="current"), first)
+        self.assertEqual(read_alert(self.state, "payments", seen_ids={first["incident_id"]},
+                                    environment_id="current"), second)
+        self.assertIsNone(read_alert(self.state, "payments", environment_id="current",
+                                     seen_ids={first["incident_id"], second["incident_id"]}))
+        self.assertEqual(len(list((self.state / "alerts/payments").glob("*.json"))), 3)
+
+    def test_legacy_event_is_still_available_without_a_queue(self):
+        event = self.alert(1, 1)
+        write_json(self.state / "payments.alert.json", event)
+        self.assertEqual(read_alert(self.state, "payments"), event)
+        self.assertEqual(read_alert(self.state, "payments", seen_ids=set(), environment_id="current"), event)
+        self.assertIsNone(read_alert(self.state, "payments", seen_ids={event["incident_id"]}))
+        self.assertIsNone(read_alert(self.state, "payments", environment_id="previous"))
+
+    def test_republishing_an_incident_cannot_change_its_evidence(self):
+        event = self.alert(1, 1)
+        publish_alert(self.state, event)
+        publish_alert(self.state, dict(event))
+        with self.assertRaisesRegex(RuntimeError, "different monitoring event"):
+            publish_alert(self.state, {**event, "environment_id": "different"})
+        self.assertEqual(read_alert(self.state, "payments"), event)
+        self.assertEqual(list((self.state / "alerts/payments").iterdir()),
+                         [self.state / "alerts/payments" / f"{event['incident_id']}.json"])
+
+    def test_concurrent_publishers_preserve_all_incidents(self):
+        events = [self.alert(number, number) for number in range(1, 13)]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda event: publish_alert(self.state, event), events + events))
+        self.assertEqual(len(list((self.state / "alerts/payments").glob("*.json"))), len(events))
+        self.assertEqual(read_alert(self.state, "payments"), events[-1])
+        self.assertEqual(read_alert(self.state, "payments", seen_ids=set()), events[0])
+
+    def test_monitor_retries_the_same_event_if_legacy_publication_fails(self):
+        (self.state / "payments.fault").touch()
+        observations = {"service": "payments", "environment_id": "current", "error_rate": .5}
+        writes = []
+
+        def flaky_write(path, value):
+            writes.append(value)
+            if len(writes) == 1:
+                raise OSError("Controlled latest-event write failure")
+            write_json(path, value)
+
+        with patch("environment.get_snapshot", return_value=observations), \
+                patch("environment.write_json", side_effect=flaky_write):
+            stop = unittest.mock.Mock()
+            stop.wait.side_effect = [False, False, False, True]
+            monitor_alerts(self.state, stop)
+
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(writes[0], writes[1])
+        self.assertEqual(len(list((self.state / "alerts/payments").glob("*.json"))), 1)
+        self.assertEqual(read_alert(self.state, "payments"), writes[0])
 
     def test_rejects_external_address_before_opening_http(self):
         self.endpoint("http://example.invalid:8080")

@@ -87,7 +87,7 @@ def replay(case, state, skill, options):
     statuses = iter(case.statuses)
     step = 0
 
-    def probe(_state, service):
+    def probe(_state, service, *, environment_id=None):
         nonlocal step
         status = next(statuses, None)
         if status is None:

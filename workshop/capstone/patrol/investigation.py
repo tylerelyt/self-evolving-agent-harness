@@ -3,6 +3,7 @@
 
 import argparse
 from contextlib import closing, nullcontext
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ import time
 
 from environment import DEFAULT_STATE, SERVICES, get_snapshot, probe_service, write_json
 from hermes_runtime import (FOLLOWUP_PREFIX, ONCALL_SKILL, checkpoint_rows, ensure_loopback_no_proxy,
-                            fork, open_sessions, read_oncall_skill, run_turn)
+                            fork, open_sessions, preserve_skill_version, read_oncall_skill, run_turn)
 from patrol import connect, decode_report, incidents, model_connection, writer_lock
 
 
@@ -86,6 +87,14 @@ def investigate(state, environment_state, record, options, *, langfuse=False, se
             if saved is None or saved[0] is not None:
                 raise RuntimeError("The incident was closed before the follow-up started")
             prefix = checkpoint_rows(sessions, record)
+            loaded = next((row for row in prefix if row["id"] == record["skill_item_id"] and row["role"] == "tool"), None)
+            receipt = json.loads(loaded["content"]) if loaded else {}
+            content = receipt.get("content", "").encode("utf-8")
+            if (receipt.get("name") != ONCALL_SKILL or receipt.get("sha256") != skill_sha
+                    or hashlib.sha256(content).hexdigest() != skill_sha):
+                raise RuntimeError("The source report lacks the pinned Skill content")
+            # Recover a version from pre-snapshot patrol records as well.
+            preserve_skill_version(state, content)
             child, copies = branch_report(sessions, record)
         rows, _ = run_turn(sessions, child, prompt,
                            {"skill_view": skill_view, "followup_probe": followup_probe}, options,
@@ -134,7 +143,18 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--offline", action="store_true", help="Use the local scripted model")
     parser.add_argument("--langfuse", action="store_true", help="Send native traces to the configured Langfuse project")
+    parser.add_argument("--implementation", type=Path, help="Workshop implementation for fork and paging")
+    parser.add_argument("--page-instance", help="Page independently when this instance finishes investigation")
     args = parser.parse_args()
+    branch_report = fork
+    notify = page_operator
+    if args.implementation:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from implementation import load_implementation
+
+        implementation = load_implementation(args.implementation)
+        branch_report = implementation.branch_report
+        notify = implementation.notify_operator
     state = args.state.resolve()
     if args.out.exists() or not (state / "patrol.sqlite").is_file():
         parser.error("Use an existing patrol state and a new output file")
@@ -148,10 +168,15 @@ def main():
             "base_url": url, "api_key": "local-fixture" if args.offline else os.environ["GLM_API_KEY"],
             "model": "patrol-fixture" if args.offline else os.environ.get("GLM_MODEL") or "glm-5.2",
         }
-        result = investigate(state, args.environment_state or state, record, options, langfuse=args.langfuse)
+        result = investigate(state, args.environment_state or state, record, options,
+                             langfuse=args.langfuse, branch_report=branch_report)
     with args.out.open("x", encoding="utf-8") as output:
         json.dump(result, output, ensure_ascii=False, indent=2)
         output.write("\n")
+    if args.page_instance:
+        scope = f"{args.page_instance}/{result['environment_id']}/{args.service}"
+        notify(args.out.parent / "page.json", "lab-oncall-approver", scope, result,
+               f"collection/{args.page_instance}/investigation.json")
     print(args.out)
 
 

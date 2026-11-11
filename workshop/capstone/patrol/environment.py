@@ -8,6 +8,7 @@ from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+import os
 from pathlib import Path
 import random
 import re
@@ -58,11 +59,57 @@ def alert_event(observation, *, emitted_at=None):
             "emitted_at": time.time() if emitted_at is None else emitted_at}
 
 
-def read_alert(state, service):
+def publish_alert(state, alert):
+    """Retain one immutable event per incident, plus the legacy latest-event file."""
+    service = alert["service"]
+    incident_id = alert["incident_id"]
+    if (service not in SERVICES or not re.fullmatch(rf"lab-{service}-[0-9a-f]{{12}}", incident_id)
+            or alert["source"] != ALERT_SOURCE or not alert["environment_id"]
+            or type(alert["emitted_at"]) not in (int, float)
+            or not math.isfinite(alert["emitted_at"]) or alert["emitted_at"] <= 0):
+        raise ValueError("Invalid lab monitoring event")
+    directory = state / "alerts" / service
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{incident_id}.json"
+    temporary = directory / f".{incident_id}.{uuid.uuid4().hex}"
     try:
-        return load_json(state / f"{service}.alert.json")
+        with temporary.open("x", encoding="utf-8") as output:
+            json.dump(alert, output)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            if load_json(target) != alert:
+                raise RuntimeError("Incident ID already belongs to a different monitoring event")
+    finally:
+        temporary.unlink(missing_ok=True)
+    write_json(state / f"{service}.alert.json", alert)
+
+
+def read_alert(state, service, *, seen_ids=None, environment_id=None):
+    """Read the latest event, or the oldest unseen event when seen_ids is supplied."""
+    events = {}
+    for path in (state / "alerts" / service).glob("*.json"):
+        alert = load_json(path)
+        if alert["incident_id"] != path.stem or alert["service"] != service:
+            raise RuntimeError("Stored monitoring event does not match its incident path")
+        events[alert["incident_id"]] = alert
+    try:
+        legacy = load_json(state / f"{service}.alert.json")
     except FileNotFoundError:
+        legacy = None
+    if legacy is not None:
+        incident_id = legacy["incident_id"]
+        if incident_id in events and events[incident_id] != legacy:
+            raise RuntimeError("Latest monitoring event differs from its immutable incident")
+        events[incident_id] = legacy
+    pending = [event for event in events.values()
+               if event["service"] == service
+               and (environment_id is None or event["environment_id"] == environment_id)
+               and (seen_ids is None or event["incident_id"] not in seen_ids)]
+    pending.sort(key=lambda event: (event["emitted_at"], event["incident_id"]))
+    if not pending:
         return None
+    return pending[-1] if seen_ids is None else pending[0]
 
 
 def inject_fault(state, service, mode, *, cleanup=None):
@@ -379,6 +426,7 @@ def traffic(url, interval, stop):
 def monitor_alerts(state, stop):
     """Simulate the external log monitor with one event per injected fault."""
     emitted = {}
+    pending = {}
     while not stop.wait(.25):
         for service in SERVICES:
             flag = state / f"{service}.fault"
@@ -386,6 +434,7 @@ def monitor_alerts(state, stop):
                 marker = flag.stat()
             except FileNotFoundError:
                 emitted.pop(service, None)
+                pending.pop(service, None)
                 continue
             key = marker.st_ino, marker.st_mtime_ns
             if emitted.get(service) == key:
@@ -394,8 +443,11 @@ def monitor_alerts(state, stop):
                 observation = get_snapshot(state, service)
                 current = flag.stat()
                 if observation["error_rate"] and (current.st_ino, current.st_mtime_ns) == key:
-                    write_json(state / f"{service}.alert.json", alert_event(observation))
+                    if service not in pending or pending[service][0] != key:
+                        pending[service] = key, alert_event(observation)
+                    publish_alert(state, pending[service][1])
                     emitted[service] = key
+                    pending.pop(service, None)
             except (OSError, RuntimeError, ValueError, KeyError):
                 # A fault can disappear between the metric read and delivery.
                 continue

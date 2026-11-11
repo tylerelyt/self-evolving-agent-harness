@@ -235,6 +235,7 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
     alert_id = None
     skill_read = False
     patrol_read = False
+    observed_environment = None
 
     def deliver_alert(steer, name, receipt):
         nonlocal alert_id
@@ -243,7 +244,9 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
         metrics = json.loads(receipt)
         if metrics.get("error"):
             return
-        alert = incoming_alert if incoming_alert is not None else read_alert(state, service)
+        alert = incoming_alert if incoming_alert is not None else read_alert(
+            state, service, seen_ids=seen_alerts, environment_id=metrics["environment_id"],
+        )
         if not alert:
             return
         candidate = alert["incident_id"]
@@ -274,16 +277,21 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
         if not skill_read:
             return {"error": "Read the assigned On-call Skill before probing"}
         try:
-            return probe_request(state, service)
+            receipt = probe_request(state, service, environment_id=observed_environment)
+            if not receipt.get("error") and (receipt.get("service") != service
+                    or receipt.get("environment_id") != observed_environment):
+                return {"error": "Probe response belongs to a different service or environment"}
+            return receipt
         except (URLError, OSError, ValueError, KeyError) as exc:
             return {"error": f"Cannot probe {service}: {exc}"}
 
     def current():
-        nonlocal active
+        nonlocal active, observed_environment
         if not patrol_read:
             return {"error": "Read the assigned patrol Skill before taking measurements"}
         try:
             metrics = snapshot(state, service)
+            observed_environment = metrics["environment_id"]
             active = next((row for row in open_incidents if json.loads(row["observation"])["environment_id"]
                            == metrics["environment_id"]), None)
             return dict(metrics, history_available=last is not None)
@@ -370,7 +378,7 @@ def show(value):
 
 def run(state, db, sessions, options, interval, sample, rounds, oncall, *,
         environment_state=None, skill_file=None, capture_session=False, services=SERVICES, langfuse=False,
-        fleet=False, page_oncall=False, oncall_steps=None):
+        fleet=False, page_oncall=False, oncall_steps=None, incident_id=None):
     skill_sha = install_oncall_skill(state, skill_file) if oncall else None
     patrol_skill_sha = install_oncall_skill(state, name=PATROL_SKILL)
     environment_state = environment_state or state
@@ -388,12 +396,25 @@ def run(state, db, sessions, options, interval, sample, rounds, oncall, *,
                 with writer_lock(state):
                     if fleet:
                         record = inspect_fleet_service(state, sessions, db, service, environment_state,
-                                                       options, langfuse, patrol_skill_sha)
+                                                       options, langfuse, patrol_skill_sha,
+                                                       route_alert=route_alert)
                     else:
+                        if oncall and skill_file is not None:
+                            skill_sha = install_oncall_skill(state, skill_file)
+                        pending = read_alert(
+                            environment_state, service,
+                            seen_ids={item["incident_id"] for item in incidents(db, service)},
+                        ) if capture_session else None
+                        selected_alert = None
+                        if incident_id is not None:
+                            selected_alert = load_json(environment_state / "alerts" / service / f"{incident_id}.json")
                         record = inspect_service(
                             sessions, db, service, environment_state, options, skill_sha,
-                            patrol_skill_sha=patrol_skill_sha, capture_session=capture_session, langfuse=langfuse,
+                            patrol_skill_sha=patrol_skill_sha,
+                            capture_session=capture_session and pending is not None, langfuse=langfuse,
                             auto_recover=not page_oncall, route_alert=route_alert,
+                            fresh_session=capture_session and pending is not None,
+                            incoming_alert=selected_alert,
                         )
                     if record is not None:
                         show(record)
@@ -465,7 +486,8 @@ def check_paged_recovery(state, db, service, record):
         link_recovery(db, active["incident_id"], record["id"])
 
 
-def inspect_fleet_service(state, sessions, db, service, environment_state, options, langfuse, patrol_skill_sha):
+def inspect_fleet_service(state, sessions, db, service, environment_state, options, langfuse, patrol_skill_sha, *,
+                          route_alert=steer_oncall):
     try:
         dispatch = load_json(state / "dispatch.json")
     except FileNotFoundError:
@@ -474,7 +496,7 @@ def inspect_fleet_service(state, sessions, db, service, environment_state, optio
         directory = Path(dispatch["directory"])
         incident_path = directory / "detected.json"
         if incident_path.is_file():
-            if not (directory / "page.json").is_file():
+            if service == dispatch["service"] and not (directory / "page.json").is_file():
                 return None
         elif (service == dispatch["service"] and (alert := read_alert(environment_state, service))
               and alert["emitted_at"] >= dispatch["armed_at"]):
@@ -485,6 +507,7 @@ def inspect_fleet_service(state, sessions, db, service, environment_state, optio
                 sessions, db, service, environment_state, {**options, "base_url": dispatch["capture_url"]},
                 skill_sha, patrol_skill_sha=patrol_skill_sha, capture_session=True, langfuse=langfuse,
                 fresh_session=True, auto_recover=False, incoming_alert=alert,
+                route_alert=route_alert,
             )
             if "incident_id" in record:
                 write_json(directory / "alert.json", alert)
@@ -534,11 +557,18 @@ def main(argv=None, *, oncall_steps=None):
     runner.add_argument("--capture-url", help="SkillClaw Client Proxy endpoint for this instance")
     runner.add_argument("--langfuse", action="store_true", help="Send native traces to the configured Langfuse project")
     runner.add_argument("--fleet-worker", action="store_true", help=argparse.SUPPRESS)
+    runner.add_argument("--implementation", type=Path, help="On-call implementation used by this worker")
+    runner.add_argument("--incident-id", help=argparse.SUPPRESS)
     status = commands.add_parser("status", help="Read lab readiness, saved patrol checkpoints and last incidents")
     status.add_argument("--environment-state", type=Path, help="Inspect a separately started lab environment")
     for command in ("history", "resume", "fork", "incidents"):
         commands.add_parser(command).add_argument("service", choices=SERVICES)
     args = parser.parse_args(argv)
+    if args.command == "run" and args.implementation:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from implementation import load_implementation
+
+        oncall_steps = load_implementation(args.implementation)
     if args.command == "run" and (
         not math.isfinite(args.interval) or args.interval < 0
         or (args.rounds is None and args.interval <= 0)
@@ -550,6 +580,10 @@ def main(argv=None, *, oncall_steps=None):
         parser.error("Fleet workers use a continuous schedule and a separate environment")
     if args.command == "run" and args.page_oncall and not args.oncall:
         parser.error("--page-oncall requires --oncall")
+    if args.command == "run" and args.incident_id is not None and (
+            not args.services or len(args.services) != 1
+            or not re.fullmatch(rf"lab-{args.services[0]}-[0-9a-f]{{12}}", args.incident_id)):
+        parser.error("A selected incident requires one matching --service")
     state = args.state.resolve()
     if args.command == "status":
         result = read_status(state, (args.environment_state or state).resolve())
@@ -583,6 +617,7 @@ def main(argv=None, *, oncall_steps=None):
                     capture_session=bool(args.capture_url),
                     services=args.services or SERVICES, langfuse=args.langfuse,
                     fleet=args.fleet_worker, page_oncall=args.page_oncall, oncall_steps=oncall_steps,
+                    incident_id=args.incident_id,
                 )
             return
         with writer_lock(state), open_sessions(state) as sessions:

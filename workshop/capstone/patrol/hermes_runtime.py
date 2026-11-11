@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -147,26 +148,57 @@ def open_sessions(state, *, fresh=False, memory_text=None, langfuse=False):
                 os.environ[name] = value
 
 
+def _replace_skill_file(path, content):
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(content)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def preserve_skill_version(state, content, *, name=ONCALL_SKILL):
+    """Keep immutable content available to tasks pinned before the next release."""
+    if name in ("", ".", "..") or Path(name).name != name:
+        raise ValueError("Skill name must be a single directory component")
+    digest = hashlib.sha256(content).hexdigest()
+    snapshot = state / "hermes" / "skills" / name / "references" / "versions" / f"{digest}.md"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    if snapshot.exists():
+        if snapshot.read_bytes() != content:
+            raise RuntimeError("Saved Skill version does not match its content hash")
+    else:
+        _replace_skill_file(snapshot, content)
+    return digest
+
+
 def install_oncall_skill(state, source=None, *, name=ONCALL_SKILL):
     if name in ("", ".", "..") or Path(name).name != name:
         raise ValueError("Skill name must be a single directory component")
     source = source or Path(__file__).with_name("skills") / name / "SKILL.md"
     target = state / "hermes" / "skills" / name / "SKILL.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
     content = source.read_bytes()
-    target.write_bytes(content)
-    return hashlib.sha256(content).hexdigest()
+    digest = preserve_skill_version(state, content, name=name)
+    if target.is_file():
+        preserve_skill_version(state, target.read_bytes(), name=name)
+    _replace_skill_file(target, content)
+    return digest
 
 
 def read_oncall_skill(expected_sha, *, name=ONCALL_SKILL):
     from tools.skills_tool import skill_view
 
-    receipt = json.loads(skill_view(name, preprocess=False))
+    if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+        raise ValueError("Expected Skill version must be a SHA-256 content hash")
+    receipt = json.loads(skill_view(name, file_path=f"references/versions/{expected_sha}.md", preprocess=False))
+    if not receipt.get("success"):
+        # Older patrol states may have only the active file until next install.
+        receipt = json.loads(skill_view(name, preprocess=False))
     if not receipt.get("success") or receipt.get("name") != name:
-        raise RuntimeError("Hermes could not read the active On-call Skill")
+        raise RuntimeError("Hermes could not read the pinned On-call Skill")
     actual_sha = hashlib.sha256(receipt["content"].encode("utf-8")).hexdigest()
     if actual_sha != expected_sha:
-        raise RuntimeError("On-call Skill content does not match the active version")
+        raise RuntimeError("On-call Skill content does not match the pinned version")
     return {"success": True, "name": name, "sha256": actual_sha, "content": receipt["content"]}
 
 

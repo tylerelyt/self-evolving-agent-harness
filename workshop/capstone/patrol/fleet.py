@@ -230,8 +230,18 @@ def recover(iteration, environments, proofs, workers):
             if plan["approval_required"]:
                 runtime.request_action(incident, operation, evidence, action=plan["action"])
             runtime.handoff(incident, APPROVER, [operation] if plan["approval_required"] else [])
-            pages[alias] = page_operator(iteration / "collection" / alias / "page.json", APPROVER,
-                                         scope, investigation, evidence)
+            page_path = iteration / "collection" / alias / "page.json"
+            if page_path.is_file():
+                page = load_json(page_path)
+                if (page["incident_id"] != incident or page["scope"] != scope
+                        or page["recipient"] != APPROVER or page["evidence"] != evidence
+                        or page["session_id"] != investigation["session_id"]
+                        or page["report_item_id"] != investigation["report_item_id"]
+                        or page["report"] != investigation["report"]):
+                    raise RuntimeError(f"{alias}: page does not refer to the verified investigation")
+                pages[alias] = page
+            else:
+                pages[alias] = page_operator(page_path, APPROVER, scope, investigation, evidence)
 
         resumed = wait_for_patrols(workers, lambda alias, state: newer_checkpoint(
             state, TARGETS[alias], pages[alias]["paged_at"], scopes[alias][2],
@@ -325,7 +335,7 @@ def newer_checkpoint(state, service, after, environment_id, *, healthy=False):
     return record
 
 
-def start_patrols(root, environments, stack, live, *, scoped, langfuse):
+def start_patrols(root, environments, stack, live, *, scoped, langfuse, implementation_file=None):
     workers = {}
     for alias, environment in environments.items():
         state = root / "patrols" / alias
@@ -337,6 +347,8 @@ def start_patrols(root, environments, stack, live, *, scoped, langfuse):
             args.extend(("--service", TARGETS[alias]))
         if langfuse:
             args.append("--langfuse")
+        if implementation_file is not None:
+            args.extend(("--implementation", str(implementation_file)))
         workers[alias] = state, stack.enter_context(process("patrol.py", state, state / "patrol.log", *args))
     return workers
 
@@ -405,11 +417,11 @@ def patrol_round(root, environments, receivers, skill_hash, options, live, *, sc
                 "run", "--oncall", "--rounds", "1", "--sample", "4",
                 "--environment-state", str(state), "--skill-file", str(skill),
                 "--capture-url", proxies[alias],
+                "--incident-id", read_alert(state, TARGETS[alias])["incident_id"],
+                "--service", TARGETS[alias],
             ]
             if not live:
                 args.append("--offline")
-            if scoped:
-                args.extend(("--service", TARGETS[alias]))
             if langfuse:
                 args.append("--langfuse")
             children[alias] = stack.enter_context(process(
@@ -445,7 +457,7 @@ def archive_patrols(root, records, skill_hash):
     return proofs, sources
 
 
-def investigate_round(root, environments, proofs, workers, live, *, langfuse=False):
+def investigate_round(root, environments, proofs, workers, live, *, langfuse=False, implementation_file=None):
     with ExitStack() as stack:
         children = {}
         for alias, environment_state in environments.items():
@@ -454,11 +466,14 @@ def investigate_round(root, environments, proofs, workers, live, *, langfuse=Fal
                 "--environment-state", str(environment_state), "--service", TARGETS[alias],
                 "--incident-id", proofs[alias]["incident"]["incident_id"],
                 "--out", str(state / "investigation.json"),
+                "--page-instance", alias,
             ]
             if not live:
                 args.append("--offline")
             if langfuse:
                 args.append("--langfuse")
+            if implementation_file is not None:
+                args.extend(("--implementation", str(implementation_file)))
             children[alias] = stack.enter_context(process(
                 "investigation.py", workers[alias][0], state / "investigation.log", *args,
             ))
@@ -767,244 +782,26 @@ def run_rollback_rehearsal(root, report, environments, receivers, recovered, opt
 
 
 def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, openviking=False,
-        rehearse_rollback=False):
-    from export_workset import build_workset
-    from fleet_eval import evaluate
-    from recovery_skill_flow import adopt_recovery_skill, prepare_recovery_skill
-    from skillclaw_evolve import evolve, release
+        rehearse_rollback=False, implementation_file=None):
+    sys.path.insert(0, str(HERE.parent))
+    from implementation import REFERENCE, load_implementation
+    from oncall_runtime import Runtime
 
-    if enterprise:
-        from enterprise_pack import build_pack, capture, finish_round
-        from enterprise_replay import evaluate as evaluate_enterprise
-
-    if langfuse and not enterprise:
-        raise ValueError("Langfuse capture requires enterprise incident snapshots")
-    ensure_loopback_no_proxy()
-    environments = {alias: root / "environments" / alias for alias in TARGETS}
-    receivers = {alias: root / "receivers" / alias for alias in TARGETS}
-    baseline = SEED
-    previous = None
-    prior_facts = None
-    recovery_skill = None
-    formal = root / "formal"
-    shared = root / "shared-facts.sqlite3"
-    report = {"mode": "live" if live else "local-script-model", "status": "running", "rounds": []}
-    report["alert_source"] = ALERT_SOURCE
-    report["patrol_skill_sha256"] = sha256(PATROL_SEED)
-    viking = {"namespace": "capstone-" + uuid4().hex, "runbooks": {}} if openviking else None
-    if viking is not None:
-        report["openviking"] = viking
-    if langfuse:
-        report["langfuse"] = {
-            "plugin": "observability/langfuse",
-            "scope": "patrol_and_followup",
-            "status": "capture_requested",
-            "expected_turns": 2 * len(TARGETS) * len(FAULTS),
-        }
-    report_path = root / "report.json"
-    write_json(report_path, report)
-
-    def step(message):
-        print(message, flush=True)
-
-    try:
-        if viking is not None:
-            from openviking_handoff import publish_runbook
-
-            step("Publish the scoped course runbooks to OpenViking")
-            for alias, service in TARGETS.items():
-                viking["runbooks"][service] = publish_runbook(viking["namespace"], service, alias)
-                write_json(report_path, report)
-        seed_sha = sha256(baseline)
-        report["seed_release"] = release(formal, baseline, seed_sha, receivers)
-        baseline = formal / "versions" / seed_sha / ONCALL_SKILL / "SKILL.md"
-        with ExitStack() as stack:
-            for alias, state in environments.items():
-                state.mkdir(parents=True)
-                args = ["serve"]
-                if enterprise:
-                    args.extend(("--trace-service", TARGETS[alias]))
-                stack.enter_context(process("environment.py", state, state / "environment.log", *args))
-            report["healthy_baseline"] = wait_for_metrics(
-                environments, lambda _alias, value: value["requests"] >= 25
-                and classify(value) == "healthy" and value["error_rate"] == 0,
-            )
-            workers = start_patrols(root, environments, stack, live, scoped=enterprise, langfuse=langfuse)
-            report["patrol_workers"] = {alias: child.pid for alias, (_, child) in workers.items()}
-            for index, faults in enumerate(FAULTS, start=1):
-                iteration = root / f"round-{index}"
-                iteration.mkdir()
-                handoff = None
-                route_revision = None
-                if prior_facts is not None:
-                    step(f"Round {index}: recall the other instance's historical fact and check current HTTP metrics")
-                    handoff = handoff_facts(iteration, environments, prior_facts, shared, live, openviking=viking)
-                if index == 2:
-                    step(f"Round {index}: verify a diagnostic route migration, revise Memory and adopt it in a fresh session")
-                    route_revision = revise_diagnostic_memory(iteration, environments["instance-a"],
-                                                             prior_facts["instance-a"]["evidence"], live)
-                ready = wait_for_patrols(workers, lambda alias, state: newer_checkpoint(
-                    state, TARGETS[alias], report["healthy_baseline"][alias]["window_end"],
-                    report["healthy_baseline"][alias]["environment_id"], healthy=True,
-                ))
-                step(f"Round {index}: inject faults while both Hermes patrols are running")
-                enterprise_round = root / "enterprise" / f"round-{index}"
-
-                def inject():
-                    if not enterprise:
-                        return set_faults(environments, faults, cleanup=stack)
-                    plan = start_enterprise_faults(
-                        enterprise_round, index, environments, report["healthy_baseline"], faults, cleanup=stack,
-                    )
-                    return {alias: target["injected_at"] for alias, target in plan["targets"].items()}
-
-                proof, sources, injected_at = collect_patrols(
-                    iteration / "collection", environments, workers, receivers, sha256(baseline), options, inject,
-                )
-                adoption_verified = previous is not None
-                if adoption_verified:
-                    verify_adoption(proof, faults)
-                before = sha256(baseline)
-                result = {
-                    "round": index, "active_sha256": before, "decision": "pending",
-                    "patrol_evidence": str((iteration / "collection" / "patrol-evidence.json").relative_to(root)),
-                    "incident_lifecycle": str((iteration / "incident-lifecycle.json").relative_to(root)),
-                    "source_sessions": {alias: entry["incident"]["session_id"] for alias, entry in proof.items()},
-                    "adoption_verified": adoption_verified,
-                }
-                if handoff is not None:
-                    result["fact_handoff"] = handoff
-                if route_revision is not None:
-                    result["route_revision"] = route_revision
-                report["rounds"].append(result)
-                write_json(report_path, report)
-                step(f"Round {index}: fork both saved reports and collect scoped follow-up evidence")
-                investigate_round(iteration / "collection", environments, proof, workers, live, langfuse=langfuse)
-                if enterprise:
-                    plan = load_json(enterprise_round / "fault-plan.json")
-                    step(f"Round {index}: freeze live dependency spans, logs and metrics before clearing faults")
-                    capture(enterprise_round, plan, environments, proof)
-                    result["enterprise_capture"] = str((enterprise_round / "capture.json").relative_to(root))
-                    distractors_before = capture_distractors(plan, environments)
-                step(f"Round {index}: page the on-call operator, resume patrol and verify approved recovery")
-                recovered, resumed = recover(iteration, environments, proof, workers)
-                write_json(iteration / "recovery.json", recovered)
-                result["recovery"] = str((iteration / "recovery.json").relative_to(root))
-                if enterprise:
-                    decoy_after = {
-                        alias: get_snapshot(state, plan["targets"][alias]["decoy_service"])
-                        for alias, state in environments.items()
-                    }
-                    lifecycle = json.loads((iteration / "incident-lifecycle.json").read_text(encoding="utf-8"))
-                    finish_round(enterprise_round, lifecycle, decoy_after)
-                    seal_distractors(enterprise_round, iteration, plan, proof, distractors_before,
-                                     capture_distractors(plan, environments))
-                    for alias, state in environments.items():
-                        (state / f"{plan['targets'][alias]['decoy_service']}.fault").unlink()
-                healthy = finish_patrols(iteration / "collection", workers, proof, recovered)
-                loop_path = iteration / "patrol-loop.json"
-                write_json(loop_path, {alias: {"before": ready[alias], "injected_at": injected_at[alias],
-                                              "resumed": resumed[alias], "recovered": healthy[alias]}
-                                       for alias in workers})
-                result["patrol_loop"] = str(loop_path.relative_to(root))
-                previous = None
-                write_json(report_path, report)
-                step(f"Round {index}: review completed incident evidence in isolated Hermes workers")
-                prior_facts = review_facts(iteration, proof, recovered, shared, live,
-                                           openviking=viking["namespace"] if viking is not None else None)
-                result["fact_reviews"] = prior_facts
-                if shared.is_file():
-                    report["shared_facts"] = shared.name
-                if index == 1:
-                    step(f"Round {index}: propose, curate and independently evaluate a recovery-check Skill")
-                    recovery_skill = prepare_recovery_skill(root, iteration, proof["instance-a"], baseline, live, process)
-                    result["recovery_skill"] = recovery_skill
-                    if gepa:
-                        from gepa_experiment import compare
-
-                        step(f"Round {index}: compare offline GEPA search on frozen HTTP cases")
-                        comparison = iteration / "gepa"
-                        result["gepa"] = str((comparison / "report.json").relative_to(root))
-                        write_json(report_path, report)
-                        compare(comparison, baseline, options, live=live)
-                elif index == 2 and recovery_skill["status"] == "approved":
-                    step(f"Round {index}: use the approved recovery-check Skill on a new incident")
-                    result["recovery_skill_adoption"] = adopt_recovery_skill(
-                        root, iteration, proof["instance-b"], recovery_skill, live, process,
-                    )
-                write_json(report_path, report)
-                step(f"Round {index}: evolve from the two completed sessions")
-                candidate, evolution = evolve(iteration / "staging", baseline, sources, options if live else None)
-                result["evolution"] = evolution
-                result["decision"] = "keep"
-                if candidate is not None and sha256(candidate) != before:
-                    step(f"Round {index}: replay baseline and candidate against the same cases")
-                    evaluation = evaluate(iteration / "evaluation", baseline, candidate, options)
-                    result["evaluation"] = evaluation
-                    if evaluation["passed"]:
-                        approved = evaluation["candidate_sha256"]
-                        if evaluation["baseline_sha256"] != before:
-                            raise RuntimeError("The evaluation did not use the active baseline")
-                        if index == len(FAULTS):
-                            # A final-round candidate has no live task left to demonstrate adoption.
-                            result["decision"] = "qualified"
-                        else:
-                            previous = baseline, before
-                            result["release"] = release(formal, candidate, approved, receivers)
-                            baseline = formal / "versions" / approved / ONCALL_SKILL / "SKILL.md"
-                            result["decision"] = "publish"
-                    else:
-                        result["decision"] = "reject"
-                result["formal_sha256"] = sha256(baseline)
-                write_json(report_path, report)
-            if rehearse_rollback:
-                step("Rehearse rollback and verify the restored Skill in fresh patrols")
-                run_rollback_rehearsal(root, report, environments, receivers, recovered, options, live)
-        workset_path = root / "http-workset.json"
-        write_json(workset_path, build_workset(root, {**report, "status": "complete"}))
-        report["http_workset"] = workset_path.name
-        if enterprise:
-            step("Build the enterprise case pack and score fresh Hermes investigations")
-            enterprise_root = root / "enterprise"
-            pack = build_pack(enterprise_root)
-            evaluation = enterprise_root / "evaluation"
-            report["enterprise"] = {
-                "pack": "enterprise/prepared/pack.json",
-                "evaluation": "enterprise/evaluation/report.json",
-                "ready": len(pack["ready"]),
-                "pending": len(pack["pending"]),
-            }
-            write_json(report_path, report)
-            assessment = evaluate_enterprise(evaluation, pack, options, live)
-            report["enterprise"]["status"] = assessment["status"]
-            write_json(report_path, report)
-            step("Build and score the enterprise incident challenge sets")
-            from enterprise_cases import run as run_enterprise_cases
-
-            report["enterprise_cases"] = run_enterprise_cases(root, options, live)
-        if langfuse:
-            report["langfuse"]["status"] = "awaiting_remote_verification"
-        report["status"] = "complete"
-    except BaseException as exc:
-        report.update(status="failed", error=str(exc) or type(exc).__name__)
-        if previous is not None:
-            try:
-                prior_path, prior_sha = previous
-                rollback = release(formal, prior_path, prior_sha, receivers, restoring=True)
-                report["rollback"] = rollback
-                if rollback["receiver_errors"]:
-                    report["rollback_error"] = "Some receivers did not restore the approved Skill"
-            except Exception as rollback_exc:
-                report["rollback_error"] = str(rollback_exc)
-        raise
-    finally:
-        write_json(report_path, report)
-    return report
+    implementation_file = Path(implementation_file or REFERENCE).resolve()
+    implementation = load_implementation(implementation_file)
+    with Runtime(root, options, live, gepa=gepa, enterprise=enterprise,
+                 langfuse=langfuse, openviking=openviking, rehearse_rollback=rehearse_rollback,
+                 implementation_file=implementation_file) as runtime:
+        runtime.implementation = implementation
+        implementation.run(runtime)
+        runtime.finish()
+    return runtime.report
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Run continuous On-call service or a controlled two-round rehearsal")
     parser.add_argument("--out", type=Path, required=True, help="New directory for the complete run")
+    parser.add_argument("--serve", action="store_true", help="Keep both On-call instances running for external incidents")
     parser.add_argument("--live", action="store_true", help="Use the configured GLM model endpoint")
     parser.add_argument("--gepa", action="store_true", help="Run the optional Lesson 20 offline GEPA comparison")
     parser.add_argument("--enterprise", action="store_true", help="Capture and score multi-service incident snapshots")
@@ -1012,7 +809,18 @@ def main():
     parser.add_argument("--openviking", action="store_true", help="Use the configured OpenViking server for cross-instance handoff")
     parser.add_argument("--rehearse-rollback", action="store_true",
                         help="Restore the prior approved Skill and verify it in fresh lab patrols")
-    args = parser.parse_args()
+    parser.add_argument("--implementation", type=Path, help="Use this On-call implementation throughout the run")
+    args = parser.parse_args(argv)
+    if args.serve:
+        if any((args.gepa, args.enterprise, args.langfuse, args.openviking, args.rehearse_rollback)):
+            parser.error("Extension and rollback flags apply to the controlled rehearsal")
+        sys.path.insert(0, str(HERE.parent))
+        from implementation import REFERENCE
+        from oncall_service import serve
+
+        ensure_loopback_no_proxy()
+        serve(args.out.resolve(), args.live, (args.implementation or REFERENCE).resolve())
+        return
     if args.openviking:
         from openviking_handoff import check_openviking
 
@@ -1048,7 +856,8 @@ def main():
             "model": (os.environ.get("GLM_MODEL") or "glm-5.2") if args.live else "patrol-fixture",
         }
         report = run(root, options, args.live, gepa=args.gepa, enterprise=args.enterprise,
-                     langfuse=args.langfuse, openviking=args.openviking, rehearse_rollback=args.rehearse_rollback)
+                     langfuse=args.langfuse, openviking=args.openviking, rehearse_rollback=args.rehearse_rollback,
+                     implementation_file=args.implementation)
     print(f"{root / 'report.json'} ({report['status']})", flush=True)
 
 
