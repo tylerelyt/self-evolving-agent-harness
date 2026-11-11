@@ -2,6 +2,10 @@
 
 极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套代码。每讲有自己的练习目录、运行说明和验收记录，按正文顺序进入即可。
 
+[![综合实战 On-call 工作台：服务指标、故障告警与并行调查](assets/images/oncall-workbench.png)](workshop/capstone/README.md#启动本地工作台)
+
+综合实战工作台实拍：两套本地 HTTP 环境、持续巡检、故障告警与并行调查。截图使用脚本模型演示；[启动工作台](workshop/capstone/README.md#启动本地工作台)。
+
 ## 逐讲练习
 
 | 讲次 | 文章主题 | 代码与运行说明 |
