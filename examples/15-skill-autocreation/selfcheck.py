@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +67,38 @@ def put(root, files):
 
 
 class SafetyChecks(unittest.TestCase):
+    def test_native_review_receives_this_lessons_policy(self):
+        import native_workshop as workshop
+        from agent import background_review
+        (HERE / 'runtime').mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=HERE / 'runtime') as directory:
+            root = Path(directory)
+            (root / 'candidate/skills').mkdir(parents=True)
+            job = {'snapshot': [{'role': 'user', 'content': '构造调查记录'}],
+                   'cached_prompt': '构造前台提示', 'baseline_sha256': package_hash({})}
+            save(root / 'job.json', job)
+            observer = SimpleNamespace(install=lambda: None, restore=lambda: None, result={})
+            parent = SimpleNamespace(close=lambda: None)
+            with patch.dict(os.environ, {'HERMES_HOME': str(root / 'candidate')}), \
+                 patch.object(workshop, 'model_options', return_value={}), \
+                 patch.object(workshop, 'register_query'), \
+                 patch('run_agent.AIAgent', return_value=parent), \
+                 patch('review_observer.ReviewObserver', return_value=observer), \
+                 patch.object(workshop, 'candidate_check', return_value={}), \
+                 patch.object(background_review, '_run_review_in_thread') as run_review:
+                workshop.review_job(root / 'job.json')
+            policy = workshop.review_policy()
+            called_parent, snapshot, prompt = run_review.call_args.args
+            self.assertIs(called_parent, parent)
+            self.assertEqual(snapshot, job['snapshot'])
+            self.assertEqual(parent._SKILL_REVIEW_PROMPT, policy)
+            self.assertTrue(prompt.startswith(policy))
+            self.assertIn('没有形成可靠流程时', policy)
+            self.assertIn('references/', policy)
+            saved = json.loads((root / 'review.json').read_text())
+            self.assertEqual(saved['prompt'], prompt)
+            self.assertEqual(saved['policy_source'], 'config/native-skill-review-policy.md')
+
     def test_error_receipts_preserve_original_result(self):
         import scenario
         from native_workshop import check_foreground, loaded_before_query

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import random
 import re
+from socketserver import TCPServer
 import threading
 import time
 from urllib.error import HTTPError
@@ -275,6 +276,19 @@ def service_address(state, service):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
         return None
+
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    """Bind the lab's numeric loopback address without reverse DNS lookups."""
+
+    def server_bind(self):
+        if self.server_address[0] != "127.0.0.1":
+            raise ValueError("Lab HTTP servers must bind the numeric loopback address")
+        # HTTPServer.server_bind calls socket.getfqdn even for a numeric host.
+        # These local servers need no DNS-derived name; on macOS that resolver
+        # call can block before any endpoint is published or signal is handled.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def open_service(state, service, path, *, headers=None):
@@ -651,7 +665,7 @@ def serve(state, trace_service=None, *, shared_root=False):
         endpoints = {}
         try:
             for name in SERVICES:
-                server = stack.enter_context(ThreadingHTTPServer(("127.0.0.1", 0), Handler))
+                server = stack.enter_context(LoopbackHTTPServer(("127.0.0.1", 0), Handler))
                 server.service = Service(name, state, environment_id, trace_service, shared_root=shared_root)
                 servers[name] = server
                 endpoints[name] = f"http://127.0.0.1:{server.server_port}"

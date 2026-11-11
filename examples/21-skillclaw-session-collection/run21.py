@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import sys
@@ -133,6 +134,8 @@ def main():
     verify_collection(directory, results)
     if args.collect_only:
         print('已收集并核对两段会话；未启动演化。兼容层标志见 collection-checks.json。', flush=True)
+        print('检查原档后，从仓库根目录接着执行：bash examples/21-skillclaw-session-collection/run.sh '
+              f'--evolve-only --run-dir {shlex.quote(str(directory))}', flush=True)
         return
     save(directory / 'evolution-attempt.json', {'started_at': time.time(), 'source_sessions': 2})
     summary = evolve_once(directory)

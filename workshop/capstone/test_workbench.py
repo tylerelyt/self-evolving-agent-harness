@@ -227,7 +227,8 @@ class WorkbenchHTTPTests(SessionTestCase):
         super().setUp()
         html = self.directory / "index.html"
         html.write_text("<p>Workbench test</p>", encoding="utf-8")
-        self.server = make_server(self.workbench, "127.0.0.1", 0, html)
+        with patch("socket.getfqdn", side_effect=AssertionError("Local workbench must not perform reverse DNS")):
+            self.server = make_server(self.workbench, "127.0.0.1", 0, html)
         thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .01}, daemon=True)
         thread.start()
         self.addCleanup(self.server.server_close)

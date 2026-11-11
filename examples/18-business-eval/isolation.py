@@ -6,10 +6,16 @@ import subprocess
 import signal
 from common import HERE, REPO
 
+SANDBOX = Path('/usr/bin/sandbox-exec')
+
+
+def require_backend():
+    if not SANDBOX.is_file() or not os.access(SANDBOX, os.X_OK):
+        raise RuntimeError('当前执行后端要求 macOS sandbox-exec；其他平台须接入等价隔离，不能裸跑')
+
 
 def prepare(work, python, source, forbidden):
-    if not Path('/usr/bin/sandbox-exec').is_file():
-        raise RuntimeError('当前执行后端要求 macOS sandbox-exec；其他平台须接入等价隔离，不能裸跑')
+    require_backend()
     home = work / 'home'; home.mkdir()
     quoted = lambda p: json.dumps(str(Path(p).resolve()), ensure_ascii=False)
     roots = ['/System', '/usr', '/bin', '/sbin', '/Library', '/opt/homebrew', '/private/etc', '/dev',
@@ -53,7 +59,7 @@ def launch(work, protocol, forbidden):
     worker = protocol.get('worker', 'hermes_worker.py')
     if worker not in ('hermes_worker.py', 'alert_worker.py'):
         raise ValueError('未知执行入口')
-    command = ['/usr/bin/sandbox-exec', '-f', str(profile), str(python), '-B', str(HERE / worker)]
+    command = [str(SANDBOX), '-f', str(profile), str(python), '-B', str(HERE / worker)]
     process = subprocess.Popen(command, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, start_new_session=True)
     try:

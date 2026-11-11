@@ -1,33 +1,23 @@
-# 课程与代码对照
+# 课程与运行条件
 
-这里列出第 01—23 讲的学习入口与独立综合实践。第 01—09 讲使用 Codex SDK 与 Notebook，第 10 讲安排 Hermes 手动观察，第 11—18 讲使用 Hermes，第 19—22 讲接上数据集、GEPA 与 SkillClaw，第 23 讲将多实例值守与版本决策连成一次实跑。
+每讲的文章主题和独立练习入口见[首页逐讲目录](README.md#逐讲练习)。第 23 讲有自己的总装练习；[独立综合实战](workshop/capstone/README.md)另列，不替代任何一讲。
 
-| 讲次 | 技术主题 | 练习入口 |
+## 环境准备
+
+| 范围 | 运行环境 | 准备说明 |
 | --- | --- | --- |
-| 01 | Agent Loop | [01-agent-loop](examples/01-agent-loop/) |
-| 02 | 运行时控制 | [02-instruction-control](examples/02-instruction-control/) |
-| 03 | 上下文引擎 | [03-context-engine](examples/03-context-engine/) |
-| 04 | AGENTS.md | [04-agents-md](examples/04-agents-md/) |
-| 05 | 上下文压缩 | [05-context-compression](examples/05-context-compression/) |
-| 06 | 会话分支 | [06-thread-fork](examples/06-thread-fork/) |
-| 07 | 经验技能化 | [07-skill-extraction](examples/07-skill-extraction/) |
-| 08 | 渐进披露 | [08-progressive-disclosure](examples/08-progressive-disclosure/) |
-| 09 | 隔离与审批 | [09-isolation-approval](examples/09-isolation-approval/) |
-| 10 | Hermes 与递归自我改进 | 正文手动观察题，查看 Hermes 留下的 Memory、Skill 及新会话中的使用情况 |
-| 11 | 后台复盘 | [11-background-review](examples/11-background-review/) |
-| 12 | Memory 修订 | [12-memory-revision](examples/12-memory-revision/)，主实现见 [workshop/oncall](workshop/oncall/README.md) |
-| 13 | 会话检索与原始回执核对 | [13-session-lookup](examples/13-session-lookup/) |
-| 14 | Memory Provider 与共享记忆 | [14-external-memory-provider](examples/14-external-memory-provider/)，文件与 SQLite 为基础练习，OpenViking 为可选进阶 |
-| 15 | 从执行经历创建 Skill | [15-skill-autocreation](examples/15-skill-autocreation/) |
-| 16 | 修订已有 Skill | [16-skill-incremental-patch](examples/16-skill-incremental-patch/) |
-| 17 | Curator 整理技能库 | [17-curator](examples/17-curator/) |
-| 18 | Skill 业务评测 | [18-business-eval](examples/18-business-eval/) |
-| 19 | 企业数据集：把真实经历变成可重跑的评测题 | [19-enterprise-dataset](examples/19-enterprise-dataset/) |
-| 20 | 离线优化：官方 GEPA 搜索 Skill 正文 | [20-gepa-offline-optimization](examples/20-gepa-offline-optimization/) |
-| 21 | SkillClaw：多实例会话采集与原生 workflow 演化 | [21-skillclaw-session-collection](examples/21-skillclaw-session-collection/) |
-| 22 | SkillClaw：客户端验证、发布、同步与恢复 | [22-skillclaw-shared-revision](examples/22-skillclaw-shared-revision/) |
-| 23 | 自进化 On-call Agent：把每一层接成一条线 | [结课大作业 · 双实例巡检与 On-call 演练](workshop/capstone/README.md) |
+| 第 01—09 讲 | Codex SDK、Notebook、本地模型适配器 | [Notebook 依赖与运行方式](examples/README.md#前置条件与运行) |
+| 第 10—18 讲 | Hermes | 各讲 README；通用依赖由 `bash scripts/setup_deps.sh` 安装 |
+| 第 19—20 讲 | Hermes、数据集与评测工具；第20讲使用 GEPA | 各讲分别准备题包、运行环境和验收目录 |
+| 第 21—23 讲 | Hermes、SkillClaw | 先运行 `bash scripts/setup_deps.sh` 和 `bash scripts/setup_skillclaw.sh`，再按本讲说明运行 |
+| 独立综合实战 | 双实例 HTTP 环境、Hermes、SkillClaw | [综合实战启动说明](workshop/capstone/README.md) |
 
-环境准备见 [README](README.md) 与 [scripts/setup_deps.sh](scripts/setup_deps.sh)。运行状态和前置条件以各讲说明为准。
+## 平台与模型
 
-综合一讲把持续巡检、故障处理、多实例 Skill 演化和下一轮采用连成一套值守系统。 [On-call 大作业](workshop/capstone/README.md)
+- Python 使用 3.12；安装脚本也支持通过 `uv` 准备环境。
+- 第 03、08、09 讲需要宿主支持 Codex 原生 Sandbox。
+- 第 18—20 讲的隔离评测需要 macOS `sandbox-exec`；其他平台可先运行各讲提供的离线自检。第 19 讲的 Skill Up 校验与 Hermes 接线预检也需要 macOS。
+- 真实模型按本讲说明配置 `GLM_API_KEY`，凭据不写入 Notebook 或提交到仓库。
+- 脚本模型用于复现实验流程，其结果与真实模型效果分别记录。
+
+跨讲可以复用经过核对的材料，也可使用本讲提供的教学输入。各讲自己的准备、任务、运行步骤与验收条件以对应 README 为准。

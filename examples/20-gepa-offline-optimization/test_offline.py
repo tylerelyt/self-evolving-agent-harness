@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -56,6 +57,16 @@ class OfflineTests(unittest.TestCase):
                 self.assertNotIn('expected', task['snapshot'])
                 self.assertNotIn('required_citations', task['snapshot'])
                 self.assertTrue(all('role' not in row for row in task['snapshot']['logs']))
+
+    def test_inspect_dataset_runs_without_site_packages(self):
+        result = subprocess.check_output([sys.executable, '-E', '-S', '-B', str(HERE / 'optimize.py'),
+                                          '--inspect-dataset'], text=True, timeout=10)
+        report = json.loads(result)
+        self.assertEqual(report['status'], 'inputs_checked')
+        self.assertEqual(report['model_requests'], 0)
+        self.assertEqual({group: data['count'] for group, data in report['splits'].items()},
+                         {'train': 3, 'validation': 3, 'holdout': 3})
+        self.assertNotIn('expected', result)
 
     def test_exact_body_and_header_roundtrip(self):
         header = '---\r\nname: oncall-alert-triage\r\ndescription: 诊断\r\n---\r\n'

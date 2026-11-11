@@ -1,14 +1,28 @@
 # 第22讲：发布、共享与恢复 Skill
 
-继续第21讲留下的结果，不重新创建候选：`direct` 读取已正式发布的版本；`validated` 才由原生 `ValidationWorker.run_once(force=True)` 回放 baseline 和 candidate、调用 PRM，再由 `EvolveServer.run_once()` 决定发布、拒绝或等待。正式发布后，另一个实例通过原生 SkillHub 同步，在全新 Hermes 会话中检查技能读取与实际工具调用，最后重新发布旧内容并验证恢复。
+本讲独立练习 `timeout-triage` 的发布、同步和实际使用。随讲提供旧版与增加连接池检查的教学候选。`direct` 用原生 SkillHub 发布这份输入；`validated` 将其放入原生验证队列，由 `ValidationWorker` 和 Evolve Server 决定是否发布。随后让接收端同步，新旧版各在独立 Hermes 会话中处理相同的两类故障，最后恢复旧内容并再查一次。已有第 21 讲结果时，也可以选择接续实际演化记录。
 
 先按仓库根 README 准备依赖，再进入本目录：
 
 ```bash
 cd examples/22-skillclaw-shared-revision
 bash run.sh --offline
-bash run.sh --source-run /你的第21讲运行目录
+bash run.sh --standalone --prepare-only
 ```
+
+`--prepare-only` 无需模型密钥，只准备本讲的独立共享组和两份输入。终端显示输入目录和 `model_requests: 0`。目录中的 `provided.json` 记录这两版是教学输入，`evolve_history.jsonl` 为空。对照本讲的文件发布、候选待验证和新会话读取，观察每个环节各留下什么记录。
+
+配置模型访问与预算后，在本讲目录独立运行。
+
+```bash
+bash run.sh --standalone
+# 比较另一条原生发布路径，可换一个新共享组运行。
+bash run.sh --standalone --publish-mode validated
+```
+
+每条命令建立独立运行目录。首次先在旧 Skill 下处理 `pool` 和 `upstream`，同步后用发布版重做相同两题，恢复后再处理一次 `pool`。`observation.json` 的 `paired_tasks` 记录相同快照指纹、独立 Session 和两版工具顺序。候选的文本验证及最终业务行为均以实际结果为准。
+
+若已经完成第 21 讲，可以改用 `bash run.sh --source-run /你的第21讲运行目录`。这条接续路径保留原来的正式版本、待验证候选和历史，来源检查通过后在副本中继续。
 
 依赖通过 `scripts/setup_skillclaw.sh --check` 检查，SkillClaw 固定版本以仓库的 `scripts/skillclaw-revision.txt` 为准。本讲与共用代码使用同一套依赖。真实运行前设置 `GLM_API_KEY`，可用 `GLM_BASE_URL` 指向预算代理，并用 `GLM_MODEL` 指定模型；回放、PRM、发布时可能发生的合并，以及 Hermes 会话都使用这组连接。GLM 请求关闭 thinking，SDK 超时为120秒、SDK 自动重试为0；原生回放客户端仍有自己的重试逻辑，费用上限应由预算代理控制。
 
@@ -26,7 +40,7 @@ bash run.sh --source-run /你的第21讲运行目录
 
 每项任务的 `input.json` 保留实际 system/user 提示，`messages.json` 保留工具选择、回执和回答，`result.json` 记录 `task_protocol`。对旧候选直接复验，可以把“执行提示修订”和“重新采集并演化”分开观察。无模型回归只能确认接线和检查逻辑，是否修好了模型行为仍须看新的真实运行；旧失败记录不因此变成成功。
 
-`workshop.ipynb` 直接调用同一 `run.sh`，默认关闭付费单元格。不要把再次执行在线单元格当成断点续跑：它会另建副本并再次付费，而不是覆盖或恢复第21讲。先读已有报告再决定是否另开一次验证。
+`workshop.ipynb` 直接调用同一 `run.sh`，默认提供本讲独立输入并关闭付费单元格。可将 `SOURCE_RUN` 填成第 21 讲运行目录来接续。再次执行在线单元格会另建副本并再次调用模型，先读已有报告再决定是否另开一次验证。
 
 ## 原生同步与任务内版本
 
@@ -40,6 +54,7 @@ bash run.sh --source-run /你的第21讲运行目录
 
 | 阶段 | 要查看的记录 |
 | --- | --- |
+| 旧版对照 | `baseline-pool`、`baseline-upstream` 保存同步前同题调查，实际加载来源旧内容 |
 | 原生验证 | baseline/candidate 的文本回答、PRM 投票和分数，以及服务端原生发布决定 |
 | 文件同步 | 共享清单、正式文件与独立接收端文件的哈希一致 |
 | 新会话 pool | 原生 `skill_view` 读取新版；健康、上游均正常后，实际调用 `query_connection_pool` 并得到 `waiting_requests: 24` |
@@ -50,7 +65,7 @@ bash run.sh --source-run /你的第21讲运行目录
 
 检查完整快照字段和对应消息中的调用 ID、参数、回执及最终回答。判断“正常后再查连接池”要求健康与上游回执先出现在模型上下文中，随后另一轮决策才发出连接池调用；同批并发查询不算条件行为，工具 handler 的完成顺序不能替代这个判断。
 
-早期来源的旧 Skill 没有明确禁止额外查询，新 seed 则明确了一轮初查的结束条件。恢复阶段一律核对来源保存的旧内容，不换成仓库当前 seed；恢复后的动作只作观察，不作为文件恢复的通过条件。输出中的 `storage`、`loading`、`execution` 与 `behavior` 分开列出，恢复后的 `behavior` 为 `observation_only`（仅作观察），实际查询仍完整保留。这一既有检查口径不变，原失败报告也不重写。查询执行检查不替代对最终回答的业务判断。若旧版也调用相同工具，单次新版调用成功不足以证明修改带来了收益。
+早期来源的旧 Skill 没有明确禁止额外查询，新 seed 则明确了一轮初查的结束条件。恢复阶段核对本轮来源保存的旧内容。输出中的 `storage`、`loading`、`execution` 与 `behavior` 分开列出，旧版和恢复后的 `behavior` 为 `observation_only`（仅作观察），实际查询仍完整保留。对照两版的 Session 与回执，再判断新增连接池步骤和上游异常分支分别怎样执行。若旧版也调用相同工具，单次新版调用成功不足以证明修改带来了收益。
 
 SkillHub 默认完整拉取可能删除本地独有技能，因此本例只在运行副本的独立接收端目录执行 mirror。恢复是把 seed 中保存的旧内容重新 push，形成一次新的共享更新，再 pull 和启动新会话；它不是撤销历史版本号，也不会撤销过去执行的工具。`skillclaw restore hermes` 恢复的是代理接入配置，不用于恢复 Skill 内容。
 

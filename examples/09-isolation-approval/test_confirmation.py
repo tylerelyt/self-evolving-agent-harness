@@ -109,6 +109,23 @@ class ConfirmationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.story.config_from_materials()
 
+    def test_hotfix_cannot_run_before_selfcheck_or_after_reconfirmation(self):
+        with patch("builtins.input", side_effect=["确认计划", "应用配置"]):
+            self.story.confirm_plan("本轮计划")
+            self.story.confirm_scope(self.config)
+        self.story.replay_write = Mock(side_effect=AssertionError("自检前不得修改业务文件"))
+        with self.assertRaisesRegex(ValueError, "临时文件自检"):
+            self.story.replay_hotfix(self.config)
+        self.story.replay_write.assert_not_called()
+
+        self.story._checked_permission = deepcopy(self.config)
+        self.assertEqual(self.story.require_checked_permission(self.config), self.config)
+        with patch("builtins.input", return_value="应用配置"):
+            self.story.confirm_scope(self.config)
+        with self.assertRaisesRegex(ValueError, "临时文件自检"):
+            self.story.replay_hotfix(self.config)
+        self.story.replay_write.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

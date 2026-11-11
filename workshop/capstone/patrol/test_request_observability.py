@@ -2,7 +2,6 @@
 
 from contextlib import ExitStack, closing, contextmanager
 from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
 import signal
@@ -14,7 +13,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from environment import (CHANGE_SOURCE, Handler, REQUEST_LOG_SOURCE, Service,
+from environment import (CHANGE_SOURCE, Handler, LoopbackHTTPServer, REQUEST_LOG_SOURCE, Service,
                          get_request_logs, get_snapshot, inject_fault,
                          read_changes, write_json)
 
@@ -33,7 +32,7 @@ class RequestObservabilityTests(unittest.TestCase):
     @contextmanager
     def http_service(self):
         service = Service("payments", self.state, self.scope)
-        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        with LoopbackHTTPServer(("127.0.0.1", 0), Handler) as server:
             server.service = service
             write_json(self.state / "environment.json", {
                 "payments": f"http://127.0.0.1:{server.server_port}",
@@ -190,41 +189,70 @@ for count in range(12):
         ])
 
     def test_environment_start_records_its_actual_published_scope(self):
-        process = subprocess.Popen(
-            [sys.executable, "-E", "-S", "-B", str(PATROL / "environment.py"),
-             "--state", str(self.state), "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
-        )
-        try:
-            deadline = time.monotonic() + 10
-            while True:
-                self.assertIsNone(process.poll(), "Environment exited before publishing HTTP endpoints")
-                if (self.state / "environment.json").is_file():
-                    try:
-                        snapshot = get_snapshot(self.state, "payments")
-                        if snapshot["requests"]:
-                            break
-                    except (OSError, ValueError, KeyError):
-                        pass
-                if time.monotonic() >= deadline:
-                    self.fail("Environment never published a live HTTP metric window")
-                time.sleep(.02)
-            rows = read_changes(self.state, environment_id=snapshot["environment_id"])
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0]["type"], "environment_started")
-            self.assertEqual((rows[0]["service"], rows[0]["before"], rows[0]["after"]), (None, None, "running"))
-            self.assertEqual(rows[0]["actor"], "lab-environment")
-            self.assertNotEqual(snapshot["environment_id"], self.scope)
-        finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGINT)
+        self.assert_environment_start()
+
+    def test_environment_start_and_http_traffic_do_not_depend_on_reverse_dns(self):
+        self.assert_environment_start(forbid_reverse_dns=True)
+
+    def assert_environment_start(self, *, forbid_reverse_dns=False):
+        command = [sys.executable, "-E", "-S", "-B"]
+        if forbid_reverse_dns:
+            command.extend(["-c", '''
+import runpy
+import socket
+import sys
+def forbid(*_args, **_kwargs):
+    raise AssertionError("Loopback service startup must not query reverse DNS")
+socket.getfqdn = forbid
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+'''])
+        command.extend([str(PATROL / "environment.py"), "--state", str(self.state), "serve"])
+        # A file cannot fill up an undrained stderr pipe while startup is polled.
+        # Keep child diagnostics in any assertion, including a failed shutdown,
+        # instead of masking the first failure with communicate's timeout.
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+            process = subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT, text=True)
+            failure = None
+            shutdown_timed_out = False
             try:
-                _output, error = process.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate(timeout=5)
-                raise
-        self.assertEqual(process.returncode, 0, error)
+                deadline = time.monotonic() + 10
+                while True:
+                    self.assertIsNone(process.poll(), "Environment exited before publishing HTTP endpoints")
+                    if (self.state / "environment.json").is_file():
+                        try:
+                            snapshot = get_snapshot(self.state, "payments")
+                            if snapshot["requests"]:
+                                break
+                        except (OSError, ValueError, KeyError):
+                            pass
+                    if time.monotonic() >= deadline:
+                        self.fail("Environment never published a live HTTP metric window")
+                    time.sleep(.02)
+                rows = read_changes(self.state, environment_id=snapshot["environment_id"])
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["type"], "environment_started")
+                self.assertEqual((rows[0]["service"], rows[0]["before"], rows[0]["after"]), (None, None, "running"))
+                self.assertEqual(rows[0]["actor"], "lab-environment")
+                self.assertNotEqual(snapshot["environment_id"], self.scope)
+            except Exception as exc:
+                failure = exc
+            finally:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    shutdown_timed_out = True
+                    process.kill()
+                    process.wait(timeout=5)
+            output.seek(0)
+            diagnostics = output.read()[-12000:]
+        if failure is not None:
+            raise AssertionError(f"{failure}\nChild output:\n{diagnostics}\n"
+                                 f"Shutdown timed out: {shutdown_timed_out}") from failure
+        self.assertFalse(shutdown_timed_out, f"Environment did not stop after SIGINT.\n{diagnostics}")
+        self.assertEqual(process.returncode, 0, diagnostics)
         self.assertFalse((self.state / "environment.json").exists())
 
 

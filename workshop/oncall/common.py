@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BASE = HERE / 'runtime'
+BASE = (HERE.parents[1] / 'examples/12-memory-revision/runtime'
+        if os.environ.get('ONCALL_LESSON') == '12' else HERE / 'runtime')
 ACTIVE = BASE / 'active.json'
 
 

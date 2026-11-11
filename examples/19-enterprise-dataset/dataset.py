@@ -33,7 +33,7 @@ def file_digest(path):
 def inside(path):
     path = Path(path).resolve()
     if not path.is_relative_to(HERE):
-        raise ValueError('本练习的输出必须留在本目录内')
+        raise ValueError('数据集输出必须位于集成模块目录内')
     return path
 
 
@@ -139,12 +139,31 @@ def verify(pack):
             raise ValueError('评分器、标注结构或快照查询代码已变化，应重新生成评测包并重评各版')
 
 
+def inspect_pack(path):
+    pack = read(path)
+    verify(pack)
+    return {'status': 'pack_checked', 'pack_sha256': pack['pack_sha256'], 'versions': pack['versions'],
+            'splits': {split: [case['id'] for case in pack['ready'] if case['split'] == split]
+                       for split in ('dev', 'holdout')},
+            'pending': [{'case_id': case['case_id'], 'reasons': case['reasons']} for case in pack['pending']]}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=HERE / 'fixtures/rollouts.json')
     parser.add_argument('--annotations', type=Path, default=HERE / 'fixtures/annotations.json')
     parser.add_argument('--snapshots', type=Path, default=HERE / 'fixtures/snapshots')
-    parser.add_argument('--out', type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--out', type=Path, help='将 Rollout 编为新题包')
+    mode.add_argument('--inspect', type=Path, metavar='PACK', help='只核对已有 pack.json 并列出题号和待补原因')
     args = parser.parse_args()
-    result = build(args.source, args.annotations, args.snapshots, args.out)
-    print(json.dumps({'ready': len(result['ready']), 'pending': len(result['pending']), 'pack_sha256': result['pack_sha256']}, ensure_ascii=False))
+    if args.inspect:
+        try:
+            result = inspect_pack(args.inspect)
+        except (OSError, ValueError, KeyError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        result = build(args.source, args.annotations, args.snapshots, args.out)
+        print(json.dumps({'ready': len(result['ready']), 'pending': len(result['pending']),
+                          'pack_sha256': result['pack_sha256']}, ensure_ascii=False))

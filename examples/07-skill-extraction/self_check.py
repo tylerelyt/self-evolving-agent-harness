@@ -20,6 +20,8 @@ def run():
     checks = {
         "代码可解析且源Notebook无输出": all(c["execution_count"] is None and not c["outputs"] for c in cells),
         "主路径不复制预置初稿或答案": all(name not in "\n".join(sources.values()) for name in ("first-draft-SKILL.md", "reviewed-SKILL.md")),
+        "正文第一版只初始化操作说明": "--resources" not in "".join(notebook["cells"][4]["source"])
+            and "第一版只保留操作说明" in "".join(notebook["cells"][5]["source"]),
     }
     (here / ".runtime").mkdir(exist_ok=True, mode=0o700)
     with tempfile.TemporaryDirectory(prefix="offline-check-", dir=here / ".runtime") as name:

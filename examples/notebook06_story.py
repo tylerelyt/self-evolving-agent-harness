@@ -19,6 +19,16 @@ ENTRIES = ["legacy_release_history", "legacy_payment_logs",
            "legacy_payment_db_pool", "legacy_payment_runtime_config"]
 
 
+def wrong_thread_checks(record, turns):
+    """核对跨任务对照已执行，是否出现错误假设由原答单独观察。"""
+    return {
+        "当前告警沿用新平台Thread": len(turns) >= 2 and bool(turns[0]["thread_id"])
+            and turns[0]["thread_id"] == turns[1]["thread_id"],
+        "新平台背景实际进入当前告警请求": record["checks"]["新平台背景仍在告警请求"] is True,
+        "当前告警取得非空实际答复": isinstance(record["answer"], str) and bool(record["answer"].strip()),
+    }
+
+
 class ThreadForkStory:
     def __init__(self, directory, mode):
         self.directory = directory.resolve()

@@ -6,6 +6,14 @@
 
 ## 先运行无费用检查
 
+本讲自带九道教学题与基线 Skill，可以从本目录独立开始。在仓库根目录先检查三组题号和输入指纹，这一步只需 Python 标准库。
+
+```bash
+bash examples/20-gepa-offline-optimization/run.sh --inspect-dataset
+```
+
+训练、验证、留出各有三题。运行搜索后，`config.json` 记录相同的题包和基线 Skill 指纹，便于确认改动的是哪一份正文。第 19 讲题包是可选接续路径，默认练习使用本讲的九题。
+
 先按仓库首页准备固定版本 Hermes。下面用课程的 Python 3.12 环境安装固定版 GEPA，`run.sh` 随后也用同一个解释器。已有装好 GEPA 的 Python 3.10 或更新环境时，可以事先设置 `GEPA_PYTHON` 为它的解释器绝对路径。
 
 ```bash
@@ -23,6 +31,8 @@ bash run.sh --offline
 在同一终端直接运行 `bash run.sh` 也是离线测试。测试中的回答和反思文本是构造数据。macOS 上另有真实沙箱检查，全程不访问模型。也可打开 [workshop.ipynb](workshop.ipynb)，选择装有 GEPA 的 Python 内核分步执行。
 
 ## 获准后才运行模型
+
+首次运行可直接按下面的[模型连接与搜索预算](#模型连接与搜索预算)启动本讲九题搜索。接续自己的历史数据时，再使用下一节的清单。
 
 ### 接续第19讲的数据集
 

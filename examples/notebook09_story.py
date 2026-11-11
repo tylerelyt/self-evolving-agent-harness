@@ -132,6 +132,7 @@ class IsolationApprovalStory:
 
     def begin_review(self):
         self.permission = self.confirmed_plan = None
+        self._checked_permission = None
         if self.closed:
             raise RuntimeError("本次运行已关闭，请重新运行准备格。")
         self.save("reviewed-config.json", {"proposal": None, "approved": None})
@@ -177,6 +178,7 @@ class IsolationApprovalStory:
 
     def begin_config(self):
         self.permission = None
+        self._checked_permission = None
         self.save("reviewed-config.json", {"proposal": None, "approved": None})
         if self.closed or self.confirmed_plan is None:
             raise ValueError("请先确认本轮计划，不能直接应用配置。")
@@ -185,6 +187,12 @@ class IsolationApprovalStory:
         if self.closed or self.permission is None or proposal != self.permission:
             raise ValueError("本轮配置未确认或已改变，禁止执行；请重新审阅。")
         return self.review_scope(proposal)
+
+    def require_checked_permission(self, proposal):
+        permission = self.require_permission(proposal)
+        if getattr(self, "_checked_permission", None) != permission:
+            raise ValueError("本轮权限尚未通过临时文件自检，禁止执行 Hotfix。")
+        return permission
 
     def replay_write(self, path, content, permission):
         """离线教学检查，只控制此回放函数；不能隔离任意 Shell 或子进程。"""
@@ -203,6 +211,7 @@ class IsolationApprovalStory:
         return allowed
 
     def replay_hotfix(self, permission):
+        self.require_checked_permission(permission)
         self.replay_write(self.allowed, "allowed", permission)
         self.replay_write(self.extra_allowed, "tests-allowed", permission)
         rejected = not self.replay_write(self.protected, "def acquire(wait_seconds=5):\n    return {'wait_seconds': wait_seconds}\n", permission)
@@ -264,6 +273,7 @@ class IsolationApprovalStory:
         self.phase(1)
 
     def record_selfcheck(self, result, start):
+        self._checked_permission = None
         if self.lab:
             value = self.observe("selfcheck", start, self.selfcheck_command, self.selfcheck_denied)
         else:
@@ -271,10 +281,15 @@ class IsolationApprovalStory:
             value = {"source": "offline-boundary-replay", "denied": not self.replay_write(self.selfcheck_denied, "forbidden", self.permission), "receipts": []}
         value["allowed_exists"] = self.selfcheck_allowed.is_file() and self.selfcheck_allowed.read_text() == "selfcheck"
         value["denied_absent"] = not self.selfcheck_denied.exists()
+        value["business_files_unchanged"] = all(digest(path) == self.before[str(path.relative_to(self.work))]
+            for path in (self.adapter, self.regression, self.protected))
         self.observations["selfcheck"] = value
         # 只撤回本次适配层探针；共享探针本来就不应存在。
         self.selfcheck_allowed.unlink(missing_ok=True)
         self.save("observations.json", self.observations)
+        if not all(value[name] for name in ("allowed_exists", "denied", "denied_absent", "business_files_unchanged")):
+            raise ValueError("执行前自检未证明权限边界生效，停止 Hotfix。")
+        self._checked_permission = deepcopy(self.permission)
 
     def replay_approval(self, review_command):
         if not self.offline:

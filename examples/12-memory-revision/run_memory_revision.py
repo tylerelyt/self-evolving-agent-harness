@@ -10,14 +10,15 @@ import os
 import shlex
 import sys
 import time
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HERMES_SRC = Path(os.environ.get("HERMES_SRC", HERE.parents[1] / ".deps/hermes-agent")).resolve()
-OUT = Path(os.environ.get("LECTURE12_OUTPUT", HERE / "output" / time.strftime("%Y%m%d-%H%M%S"))).resolve()
+OUT = Path(os.environ.get("LECTURE12_OUTPUT", HERE / "runtime" / (time.strftime("native-%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]))).resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 # 不接受生产 HERMES_HOME：教学数据始终放在本练习内的全新子目录。
-HOME = HERE / ".hermes-home" / OUT.name
+HOME = OUT / "hermes"
 HOME.mkdir(parents=True, exist_ok=False)
 os.environ["HERMES_HOME"] = str(HOME)
 os.environ["TERMINAL_CWD"] = str(OUT)
@@ -38,6 +39,14 @@ terminal:
 compression:
   enabled: false
 """, encoding="utf-8")
+
+if sys.argv[1:] == ["--check-local"]:
+    def prohibit_network(event, args):
+        if event == "socket.connect":
+            raise RuntimeError("本地工具检查禁止网络连接")
+    sys.addaudithook(prohibit_network)
+    import hermes_cli.env_loader as env_loader
+    env_loader.load_hermes_dotenv = lambda **kwargs: []
 
 from run_agent import AIAgent  # noqa: E402
 from tools.memory_tool import ENTRY_DELIMITER, MemoryStore, memory_tool  # noqa: E402
@@ -152,7 +161,7 @@ def check_local():
     """不请求模型；只验证真实 memory 工具与 AIAgent 启动/重建的实现。"""
     tool_checks()
     # 仅供初始化；这个分支绝不调用 run_conversation，不发送 API 请求。
-    key = os.environ.get("GLM_API_KEY") or os.environ.get("BIGMODEL_API_KEY") or "unused-no-api-requests"
+    key = "unused-no-api-requests"
     old_agent = make_agent(key)
     new_agent = None
     try:

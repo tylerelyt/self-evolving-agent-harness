@@ -22,7 +22,7 @@ FUTURE_TASK = "构造事件 west 出现多服务告警。请查找可用方法�
 ANSWER_FORMAT = "最后给JSON：groups为已确认分组，每项包含services列表与cause_component；unresolved_services列尚未确认原因的服务；note说明依据。"
 INITIAL_CASE = "east"
 FUTURE_CASES = [("west", FUTURE_TASK), ("single", "构造事件 single 只有一条告警。请查找可用方法并完成只读调查。")]
-FOCUS = """保留原生 _SKILL_REVIEW_PROMPT。先 skills_list、skill_view 核对已有 oncall-alert-triage 主文件和 references/alert-tools.md。
+FOCUS = """本次复盘多告警调查。先 skills_list、skill_view 核对已有 oncall-alert-triage 主文件和 references/alert-tools.md。
 从本次调查的有效技术与工具回执提炼经验。优先 patch 现有 Skill，补充事件级多告警关联步骤，不为同一排查工作另造近似 Skill。
 外层 Harness 汇总跨时段、多实例的任务分布，本次 Background Review 只复盘传入的这一段 Session，不声称自行看到了其他会话。
 工具暂时故障是工具问题；原方法有步骤而执行漏做是执行问题；原方法未覆盖事件级关联才是方法缺口。

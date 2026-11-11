@@ -8,15 +8,18 @@
 
 ## 准备
 
-在仓库根目录执行：
+本讲自带 `timeout-triage` 旧版和四个只读教学工具，可以独立采集 A/B 两段经历。先运行无模型检查，再配置自己的模型访问启动真实采集。在仓库根目录执行。
 
 ```bash
 bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
+bash examples/21-skillclaw-session-collection/run.sh --offline
 export GLM_API_KEY='你的 API key'
 export GLM_MODEL=glm-5.2
 bash examples/21-skillclaw-session-collection/run.sh
 ```
+
+采集完成先读 `collection.json` 和两个实例的 `task/messages.json`，区分连接池检查建议与真实工具回执。演化后再看 `evolve_history.jsonl` 和共享 `SKILL.md`。这两处分别回答会话是否汇入、workflow 实际改了什么。
 
 可选 `GLM_BASE_URL` 使用兼容接口或本机计费代理。模型、演化和后续验证都使用这组显式配置，不读取个人凭据。不要把真实 key 写进提交。
 

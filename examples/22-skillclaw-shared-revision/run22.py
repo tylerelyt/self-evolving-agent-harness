@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
+import uuid
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -21,6 +22,7 @@ from skillclaw_lab.observations import archive_metadata_conflicts, verify_task
 SKILL = "timeout-triage"
 ALIAS = "validator-22"
 RERUN = "请检查第21讲记录；本程序不会替你重跑或追加会话演化。"
+PROVIDED_VERSIONS = 'lesson22-provided-versions-v1'
 
 
 class StopRun(RuntimeError):
@@ -55,7 +57,9 @@ def source_parts(source: Path) -> list[Path]:
     group = component(manifest.get("group_id"))
     parts = [source / "run.json", source / "seed", source / "shared" / group,
              source / "evolve_history.jsonl"]
-    if manifest['publish_mode'] == 'direct':
+    if manifest.get('origin') == PROVIDED_VERSIONS:
+        parts += [source / 'provided.json', source / 'candidate']
+    elif manifest['publish_mode'] == 'direct':
         parts.append(source / 'result.json')
     if (source / 'collected').exists():
         parts.append(source / 'collected')
@@ -114,6 +118,46 @@ def validation_store(run: Path):
     return ValidationStore(backend="local", endpoint="", bucket="", access_key_id="",
                            secret_access_key="", local_root=str(run / "shared"),
                            group_id=component(load_run(run)["group_id"]))
+
+
+def prepare_standalone(mode: str) -> Path:
+    """Supply this lesson's two input versions, then let native publication run separately."""
+    from evolve_server.core.utils import parse_skill_content
+
+    runtime = HERE / 'runtime'
+    if runtime.is_symlink():
+        raise StopRun('runtime 不能是指向外部目录的软链接。')
+    runtime.mkdir(exist_ok=True)
+    source = Path(tempfile.mkdtemp(prefix='provided-', dir=runtime))
+    group = 'lesson22-' + uuid.uuid4().hex[:12]
+    save(source / 'run.json', {'format': 'skillclaw-course-v1', 'group_id': group,
+                             'publish_mode': mode, 'origin': PROVIDED_VERSIONS})
+    shutil.copytree(HERE / 'fixtures/baseline', source / 'seed')
+    shutil.copytree(HERE / 'fixtures/candidate', source / 'candidate')
+    baseline = source / 'seed' / SKILL / 'SKILL.md'
+    candidate = source / 'candidate' / SKILL / 'SKILL.md'
+    (source / 'evolve_history.jsonl').write_text('', encoding='utf-8')
+    shared = hub(source, 'provided-22')
+    save(source / 'provided.json', {
+        'origin': PROVIDED_VERSIONS, 'baseline_sha256': sha(baseline), 'candidate_sha256': sha(candidate),
+        'description': '本讲提供的两份教学 Skill 输入，用于练习发布和接收端对照。',
+    })
+    shared.push_skills(str(source / 'seed'))
+    if mode == 'direct':
+        shared.push_skills(str(source / 'candidate'))
+    else:
+        store = validation_store(source)
+        store.save_job({
+            'job_id': 'provided-' + uuid.uuid4().hex[:12], 'status': 'pending_validation',
+            'candidate_skill_name': SKILL, 'candidate_skill': parse_skill_content(SKILL, candidate.read_text()),
+            'current_skill': parse_skill_content(SKILL, baseline.read_text()), 'proposed_action': 'modify',
+            'source': PROVIDED_VERSIONS, 'rationale': '核对初查无解时增加连接池检查，同时保留上游异常分支。',
+            'replay_cases': [{'session_id': 'provided-case', 'turn_num': 1, 'instruction':
+                '支付接口超时，已知服务健康和上游延迟均正常。请按技能给出后续检查与判断依据；'
+                '不要声称未查询的结果已经得到验证。'}],
+            'min_results': 1, 'min_approvals': 1, 'min_score': 0.75, 'max_rejections': 1,
+        })
+    return source
 
 
 def pending_job(store) -> dict:
@@ -302,26 +346,36 @@ def summarize_outcomes(report: dict) -> dict:
 
 
 def prepare_publication(run: Path, report: dict) -> None:
-    group = component(load_run(run)["group_id"])
+    manifest = load_run(run)
+    group = component(manifest["group_id"])
     seed = run / "seed" / SKILL / "SKILL.md"
     remote = run / "shared" / group / "skills" / SKILL / "SKILL.md"
     mode = load_run(run)['publish_mode']
     report['publish_mode'] = mode
+    report['source_origin'] = manifest.get('origin', 'lesson21_run')
     collection_checks = run / 'collection-checks.json'
     report['source_collection_checks'] = json.loads(collection_checks.read_text()) if collection_checks.is_file() else None
     report["before"] = {"seed_sha256": sha(seed), "list_remote": remote_listing(run)}
     if mode == 'direct':
-        prior = json.loads((run / 'result.json').read_text())
-        if (prior.get('publish_mode') != 'direct' or not prior.get('shared_content_changed')
-                or prior.get('seed_sha256') != sha(seed) or not remote.is_file()
-                or prior.get('shared_sha256') != sha(remote) or sha(remote) == sha(seed)
-                or not prior.get('evolution', {}).get('skills_evolved')
-                or prior['evolution'].get('had_processing_error')):
-            raise StopRun('direct 来源没有确认正式内容已更新；不代为演化或调用验证模型。')
+        if manifest.get('origin') == PROVIDED_VERSIONS:
+            provided = json.loads((run / 'provided.json').read_text())
+            if (provided.get('baseline_sha256') != sha(seed) or not remote.is_file()
+                    or provided.get('candidate_sha256') != sha(remote)
+                    or sha(run / 'candidate' / SKILL / 'SKILL.md') != sha(remote)):
+                raise StopRun('本讲提供的版本与原生共享端内容不一致。')
+        else:
+            prior = json.loads((run / 'result.json').read_text())
+            if (prior.get('publish_mode') != 'direct' or not prior.get('shared_content_changed')
+                    or prior.get('seed_sha256') != sha(seed) or not remote.is_file()
+                    or prior.get('shared_sha256') != sha(remote) or sha(remote) == sha(seed)
+                    or not prior.get('evolution', {}).get('skills_evolved')
+                    or prior['evolution'].get('had_processing_error')):
+                raise StopRun('direct 来源没有确认正式内容已更新；不代为演化或调用验证模型。')
         record = next((item for item in remote_listing(run) if item['name'] == SKILL), {})
         if record.get('sha256') != sha(remote):
             raise StopRun('direct 正式文件与共享清单不一致。')
-        report['published'] = {'sha256': sha(remote), 'source': 'lesson21_direct'}
+        source_name = 'provided_teaching_versions' if manifest.get('origin') == PROVIDED_VERSIONS else 'lesson21_direct'
+        report['published'] = {'sha256': sha(remote), 'source': source_name}
         return
     store = validation_store(run)
     job = pending_job(store)
@@ -356,9 +410,15 @@ def run_lesson(run: Path, report: dict, sync_mode: str = 'poll') -> None:
     backup = run / "observed-published" / SKILL / "SKILL.md"
     backup.parent.mkdir(parents=True)
     shutil.copyfile(remote, backup)
+    report['tasks'] = {}
+    for case in ('pool', 'upstream'):
+        name = 'baseline-' + case
+        result = run_task(run / 'tasks' / name, seed, case=case)
+        messages = json.loads((run / 'tasks' / name / 'messages.json').read_text())
+        report['tasks'][name] = task_observation(result, sha(seed), case, messages=messages, restored=True)
+        save(run / 'observation.json', report)
     report["receiver_pull"] = pull_receiver(run, published_sha, sync_mode)
     receiver = run / "receiver" / "skills" / SKILL / "SKILL.md"
-    report["tasks"] = {}
     for case in ("pool", "upstream"):
         result = run_task(run / "tasks" / case, receiver, case=case)
         messages = json.loads((run / 'tasks' / case / 'messages.json').read_text())
@@ -375,8 +435,21 @@ def run_lesson(run: Path, report: dict, sync_mode: str = 'poll') -> None:
     result = run_task(run / "tasks" / "restored-pool", receiver, case="pool")
     messages = json.loads((run / 'tasks/restored-pool/messages.json').read_text())
     report["tasks"]["restored-pool"] = task_observation(result, sha(seed), "pool", messages=messages, restored=True)
+    report['paired_tasks'] = {}
+    for case in ('pool', 'upstream'):
+        before, after = report['tasks']['baseline-' + case], report['tasks'][case]
+        baseline_snapshot = run / 'tasks' / ('baseline-' + case) / 'snapshot.json'
+        candidate_snapshot = run / 'tasks' / case / 'snapshot.json'
+        same_snapshot = sha(baseline_snapshot) == sha(candidate_snapshot)
+        report['paired_tasks'][case] = {
+            'same_snapshot': same_snapshot,
+            'baseline_session': before['session_id'], 'candidate_session': after['session_id'],
+            'baseline_tools': before['tool_order'], 'candidate_tools': after['tool_order'],
+        }
+        if not same_snapshot:
+            raise StopRun('新旧版本的查询现场不同，停止对照。')
     session_ids = [item["session_id"] for item in report["tasks"].values()]
-    report["independent_sessions"] = bool(all(session_ids) and len(set(session_ids)) == 3)
+    report["independent_sessions"] = bool(all(session_ids) and len(set(session_ids)) == len(session_ids))
     report["outcomes"] = summarize_outcomes(report)
     report["status"] = report["outcomes"]["status"]
     report["message"] = report["outcomes"]["message"]
@@ -384,7 +457,10 @@ def run_lesson(run: Path, report: dict, sync_mode: str = 'poll') -> None:
 
 def write_report(run: Path, report: dict) -> None:
     save(run / "observation.json", report)
-    if report.get('publish_mode') == 'direct':
+    if report.get('source_origin') == PROVIDED_VERSIONS and report.get('publish_mode') == 'direct':
+        publication = ['本轮使用本讲提供的两份教学 Skill，发布输入及指纹见 provided.json。',
+                       '正式内容通过原生 SkillHub 发布，用于检查接收端同步和实际行为。']
+    elif report.get('publish_mode') == 'direct':
         publication = [
             '沿用第21讲已发布的正式版本，本讲不运行 ValidationWorker，也不再次产生发布决定。',
             '原始发布记录见来源 result.json，实际读取的正式文件哈希见 observation.json 的 published。',
@@ -414,7 +490,9 @@ def write_report(run: Path, report: dict) -> None:
         lines.append(f"| [{case}](tasks/{case}/result.json) | {result['loading_verified']} | "
                      f"{result['execution_verified']} | {labels[result['behavior_status']]} | "
                      + "、".join(result["tool_order"]) + " |")
-    lines += ["", "pool 应在健康、上游正常后实际查询连接池并获得 waiting_requests=24；",
+    lines += ["", "baseline-pool 与 pool 使用同一快照，分别加载旧版与发布版；baseline-upstream 与 upstream 同理。",
+              "对照的两个 Session 和实际工具顺序见 observation.json 的 paired_tasks。旧版行为按实际结果记录。",
+              "pool 应在健康、上游正常后实际查询连接池并获得 waiting_requests=24；",
               "upstream 应识别异常，不把新增条件步骤变成必做动作；该偏差仍单独判定。",
               "restored-pool 核对来源保存的旧内容与实际读取，不替换为仓库当前 seed；继续查连接池仅记为观察，不是恢复失败或行为通过。",
               "查询执行核对完整快照回执、工具调用与最终回答的消息一致性；不评价最终回答的全部业务判断。",
@@ -431,14 +509,29 @@ def write_report(run: Path, report: dict) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-run", required=True, type=Path, help="第21讲 direct/validated 模式的 run 目录（只读）")
+    source_mode = parser.add_mutually_exclusive_group(required=True)
+    source_mode.add_argument("--source-run", type=Path, help="可选接续第21讲 direct/validated 的 run 目录（只读）")
+    source_mode.add_argument('--standalone', action='store_true', help='使用本讲提供的两版 Skill，独立练习发布、同步和恢复')
+    parser.add_argument('--publish-mode', choices=('direct', 'validated'), help='独立练习的发布路径，默认 direct')
+    parser.add_argument('--prepare-only', action='store_true', help='只准备独立练习的共享版本或验证任务，不调用模型')
     parser.add_argument('--sync-mode', choices=('poll', 'manual'), default='poll')
     args = parser.parse_args(argv)
-    source = args.source_run.expanduser().resolve()
+    if (args.publish_mode or args.prepare_only) and not args.standalone:
+        parser.error('--publish-mode 和 --prepare-only 只用于 --standalone')
+    source = None
     run = None
     report = {"observation_schema": "skillclaw-lesson22-v3", "status": "stopped",
               "started_at": datetime.now(timezone.utc).isoformat()}
     try:
+        if args.standalone:
+            source = prepare_standalone(args.publish_mode or 'direct')
+        else:
+            source = args.source_run.expanduser().resolve()
+        if args.prepare_only:
+            print(json.dumps({'status': 'inputs_prepared', 'source_run': str(source),
+                              'origin': PROVIDED_VERSIONS, 'publish_mode': args.publish_mode or 'direct',
+                              'model_requests': 0}, ensure_ascii=False, indent=2))
+            return 0
         run, before = copy_source(source)
         print(f"运行目录：{run}", flush=True)
         run_lesson(run, report, args.sync_mode)

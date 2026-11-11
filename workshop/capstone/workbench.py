@@ -4,7 +4,7 @@ from collections import deque
 from contextlib import closing
 import difflib
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -21,7 +21,7 @@ from uuid import uuid4
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "patrol"))
-from environment import SERVICES, classify, get_snapshot, inject_fault, load_json, write_json
+from environment import LoopbackHTTPServer, SERVICES, classify, get_snapshot, inject_fault, load_json, write_json
 from hermes_runtime import ONCALL_SKILL
 from patrol import checkpoint, connect, decode_report, incidents
 
@@ -1130,6 +1130,6 @@ def make_server(workbench, host, port, html_path):
             except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError, SyntaxError, sqlite3.Error) as exc:
                 self.send(400, {"error": str(exc)})
 
-    server = ThreadingHTTPServer((host, port), Handler)
+    server = LoopbackHTTPServer((host, port), Handler)
     server.daemon_threads = True
     return server

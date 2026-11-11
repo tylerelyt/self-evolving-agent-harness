@@ -6,6 +6,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,27 @@ class LessonChecks(unittest.TestCase):
         run22.save(self.run / "shared/offline-team/sessions/source.json", {"session_id": "offline"})
         with self.assertRaisesRegex(run22.StopRun, "待演化会话"):
             run22.source_parts(self.run)
+
+    def test_standalone_inputs_use_native_storage_without_evolution_results(self):
+        shutil.copytree(run22.HERE / 'fixtures', self.root / 'fixtures')
+        with patch.object(run22, 'HERE', self.root):
+            for mode in ('direct', 'validated'):
+                source = run22.prepare_standalone(mode)
+                self.assertEqual(run22.load_run(source)['origin'], run22.PROVIDED_VERSIONS)
+                self.assertFalse((source / 'result.json').exists())
+                self.assertEqual((source / 'evolve_history.jsonl').read_text(), '')
+                copied, before = run22.copy_source(source)
+                self.assertEqual(before, run22.fingerprints(source, run22.source_parts(source)))
+                if mode == 'direct':
+                    report = {}
+                    run22.prepare_publication(copied, report)
+                    self.assertEqual(report['published']['source'], 'provided_teaching_versions')
+                    self.assertEqual(report['published']['sha256'], run22.sha(source / 'candidate/timeout-triage/SKILL.md'))
+                else:
+                    job = run22.pending_job(run22.validation_store(copied))
+                    self.assertEqual(job['candidate_skill']['name'], run22.SKILL)
+                    self.assertEqual(job['min_score'], 0.75)
+                    self.assertTrue(job['replay_cases'])
 
     def test_conflicted_source_archive_stops_before_validation(self):
         _, messages, _ = sample_task()

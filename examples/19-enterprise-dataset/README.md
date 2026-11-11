@@ -44,9 +44,10 @@ LF=.deps/sdk/bin/python
 cd examples/19-enterprise-dataset
 python3.12 -B selftest.py
 python3.12 -B dataset.py --out runtime/pack-v3
+python3.12 -B dataset.py --inspect runtime/pack-v3/pack.json
 ```
 
-`selftest.py` 也可用 Python 3.11 以上运行。评测包默认得到 **1 个 ready、2 个 pending**。同一事故的两段 Trace 合成一道题。重复制题时请使用新目录。
+`selftest.py` 也可用 Python 3.11 以上运行。评测包默认得到 **1 个 ready、2 个 pending**。同一事故的两段 Trace 合成一道题。`--inspect` 核对题包与评分版本，并列出可用题号和待补原因。先解释为什么另外两条记录还不能重跑，再做正文中的 Langfuse 采集与历史版本还原。重复制题时请使用新目录。
 
 ## 在 macOS 验证 Hermes 接线和 Skill Up
 

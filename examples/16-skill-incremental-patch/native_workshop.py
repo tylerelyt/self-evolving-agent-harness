@@ -53,7 +53,7 @@ def source_info():
     if head != REVISION:
         raise RuntimeError("Hermes 不是课程固定提交")
     files = ("native_workshop.py", "native_trace.py", "scenario.py",
-             "package_integrity.py", "common.py", "native_observer.py")
+             "package_integrity.py", "common.py", "native_observer.py", "config/native-skill-review-policy.md")
     return {"hermes_revision": head,
             "source_hashes": {p: hashlib.sha256((HERE/p).read_bytes()).hexdigest() for p in files}}
 
@@ -77,6 +77,13 @@ def model_options():
         base_url=os.environ.get("GLM_BASE_URL", "").strip()
         or "https://open.bigmodel.cn/api/paas/v4",
     )
+
+
+def review_policy():
+    policy = (HERE/"config/native-skill-review-policy.md").read_text()
+    if not policy.strip():
+        raise ValueError("本讲技能复盘策略为空")
+    return policy
 
 
 def register_query(audit):
@@ -222,13 +229,15 @@ def review_job(job_path):
     from agent.background_review import spawn_background_review_thread
     from native_observer import ReviewObserver
     register_query([])
+    policy = review_policy()
     parent = AIAgent(**model_options(), enabled_toolsets=["skills", "lesson_investigation"],
                      quiet_mode=True, skip_context_files=True, max_iterations=16)
     parent._cached_system_prompt = job["cached_prompt"]
+    parent._SKILL_REVIEW_PROMPT = policy
     observer = ReviewObserver(job)
     observer.install()
     try:
-        # 使用固定版本的原生提示，通过公开的 focus 参数补充课程要求。
+        # 原生实例覆盖点接入本讲策略，focus 只补充这次调查的观察范围。
         target, prompt = spawn_background_review_thread(
             parent, job["snapshot"], review_memory=False,
             review_skills=True, focus=scenario.FOCUS)
@@ -236,9 +245,12 @@ def review_job(job_path):
         thread.start()
         thread.join()
         record(job_path.parent/"review.json", {**observer.result, "prompt": prompt,
+               "policy_source": "config/native-skill-review-policy.md",
+               "policy_sha256": hashlib.sha256(policy.encode()).hexdigest(),
                "before": content_files(before_package), "before_package": before_package})
         after_package = snapshot(home/"skills")
-        review = {**observer.result, "prompt": prompt,
+        review = {**observer.result, "prompt": prompt, "policy_source": "config/native-skill-review-policy.md",
+                  "policy_sha256": hashlib.sha256(policy.encode()).hexdigest(),
                   "before": content_files(before_package), "after": content_files(after_package),
                   "before_package": before_package, "after_package": after_package,
                   "baseline_sha256": job["baseline_sha256"]}

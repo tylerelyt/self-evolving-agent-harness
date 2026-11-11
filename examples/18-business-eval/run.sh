@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
+if [[ "${1:-}" == "--offline" ]]; then
+  exec python3 -B "$HERE/alert_workshop.py" "$@"
+fi
 export HERMES_SRC="${HERMES_SRC:-$HERE/../../.deps/hermes-agent}"
 export HERMES_PYTHON="${HERMES_PYTHON:-$HERMES_SRC/.venv/bin/python}"
 export PYTHONPATH="$HERMES_SRC${PYTHONPATH:+:$PYTHONPATH}"

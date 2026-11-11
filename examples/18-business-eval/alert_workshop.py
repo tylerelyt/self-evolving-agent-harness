@@ -13,7 +13,7 @@ from common import HERE, REPO, connection_config, credentials, digest, save, sou
 from alert_dataset import CASES, public_input
 from alert_scorer import grade
 from alert_selftest import run as selfcheck
-from isolation import launch
+from isolation import launch, require_backend
 
 
 def compare(rows, candidate, repeats):
@@ -45,6 +45,7 @@ def compare(rows, candidate, repeats):
 
 class AlertEvaluation:
     def __init__(self):
+        require_backend()
         self.protocol = json.loads((HERE / 'alert_protocol.json').read_text())
         self.protocol['connection'] = connection_config(self.protocol)
         self.source = Path(os.environ.get('HERMES_SRC', REPO / '.deps/hermes-agent')).resolve()
@@ -56,7 +57,8 @@ class AlertEvaluation:
         save(self.root / 'protocol.json', self.protocol)
         save(self.root / 'expected.json', {c['id']: c['expected'] for c in CASES})
         self.forbidden = [HERE / 'alert_dataset.py', HERE / 'alert_scorer.py', HERE / 'alert_selftest.py',
-                          HERE / 'validation', HERE / 'fixtures', HERE / 'alert-skills', self.root / 'expected.json']
+                          HERE / 'alert-skills', self.root / 'expected.json']
+        self.forbidden.extend(path for path in (HERE / 'validation', HERE / 'fixtures') if path.exists())
         self.controls = selfcheck(); save(self.root / 'scorer-selftest.json', self.controls)
 
     def execute(self, version, item, repeat):

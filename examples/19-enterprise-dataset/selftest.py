@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from dataset import HERE, build, digest, prepare, read, verify
+from dataset import HERE, build, digest, inspect_pack, prepare, read, verify
 from engine import dependency
 from grader import grade
 from langfuse_io import export, publish, restore
@@ -388,6 +388,11 @@ class DatasetTests(unittest.TestCase):
             folder = Path(tmp) / 'pack'
             pack = build(HERE / 'fixtures/rollouts.json', HERE / 'fixtures/annotations.json', HERE / 'fixtures/snapshots', folder)
             verify(pack)
+            overview = inspect_pack(folder / 'pack.json')
+            self.assertEqual(overview['pack_sha256'], pack['pack_sha256'])
+            self.assertEqual(overview['splits'], {'dev': [self.case['id']], 'holdout': []})
+            self.assertEqual(len(overview['pending']), 2)
+            self.assertNotIn('expected_output', json.dumps(overview))
             public = folder / 'fixtures' / self.case['id']
             self.assertEqual({p.name for p in public.iterdir()}, {'snapshot.json', 'task.json'})
             self.assertNotIn('expected_output', ''.join(p.read_text() for p in public.iterdir()))
@@ -398,8 +403,9 @@ class DatasetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '评分语义版本不符'):
                 verify(previous)
             pack['ready'][0]['input']['prompt'] = '修改过的题目'
+            (folder / 'pack.json').write_text(json.dumps(pack))
             with self.assertRaises(ValueError):
-                verify(pack)
+                inspect_pack(folder / 'pack.json')
 
     def test_langfuse_mapping_and_version_roundtrip_with_test_double(self):
         # 这是传参检查，真实 SDK 与远端服务验收另列，不冒充联网。

@@ -2,12 +2,23 @@
 
 本讲比较同一 GLM 模型使用两版诊断技能时的业务表现：新技能能否处理多告警，又是否让原来的单告警诊断被其他集群的同名服务干扰。先校准评分器，再运行隔离的逐题对照，最后决定是否值得采用。
 
-先按仓库根 README 准备固定版本依赖，再进入本目录：
+## 本讲独立练习
+
+旧版、候选版、反例版和四道固定故障题都由本目录提供，无需先生成一份 Skill。先用已知轨迹校准评分器，再让每版在独立会话里处理相同快照，查看结果、证据归属和查询过程的差异。
+
+交付 `scorer-selftest.json`、一组同题旧版与候选回执，以及 `result.json` 的逐题比较。挑一条跨集群错误，说明即使最终答案出现正确服务名，为什么仍然不能通过。改评分规则后，用新目录重评全部版本。
+
+在仓库根目录先校准评分器。这一步使用 Python 标准库，无需模型凭据。
 
 ```bash
-cd examples/18-business-eval
-bash run.sh --offline  # 构造轨迹校准评分器，不调用模型
-bash run.sh            # 三版技能、四题、各重复两次，共24个独立会话
+bash examples/18-business-eval/run.sh --offline
+```
+
+准备固定 Hermes 依赖后，再运行完整对照。三版技能、四道题各重复两次，共 24 个独立会话。
+
+```bash
+bash scripts/setup_deps.sh
+bash examples/18-business-eval/run.sh
 ```
 
 也可打开 [workshop.ipynb](workshop.ipynb) 分步运行。当前执行后端使用 **macOS `sandbox-exec`** 隔离评分材料；其他平台会明确停止，不降级裸跑。没有设置 `GLM_API_KEY` 时隐藏询问。默认请求智谱官方端点；允许通过 `GLM_BASE_URL` 显式连接兼容端点或本地预算代理，临时令牌使用 `GLM_API_KEY`。报告分别记录执行端点与上游确认状态，不把本地代理地址当成真实上游。

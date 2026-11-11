@@ -10,7 +10,7 @@ from unittest.mock import patch
 from common import HERE, OFFICIAL_API, connection_config
 from isolation import prepare
 from alert_dataset import CASES
-from alert_workshop import compare
+from alert_workshop import AlertEvaluation, compare
 from alert_selftest import run
 
 
@@ -21,6 +21,30 @@ class RiskTests(unittest.TestCase):
 
     def test_scorer_controls(self):
         self.assertTrue(run()['passed'])
+
+    def test_missing_sandbox_stops_before_dependencies_or_credentials(self):
+        with patch('isolation.SANDBOX', Path('/not-installed/sandbox-exec')), \
+             patch('alert_workshop.verify_dependency') as dependency, \
+             patch('alert_workshop.credentials') as credentials:
+            with self.assertRaisesRegex(RuntimeError, 'sandbox-exec'):
+                AlertEvaluation()
+        dependency.assert_not_called()
+        credentials.assert_not_called()
+
+    def test_missing_optional_review_folders_are_not_required_probes(self):
+        protocol = (HERE / 'alert_protocol.json').read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'alert_protocol.json').write_text(protocol)
+            with patch('alert_workshop.HERE', root), \
+                 patch('alert_workshop.require_backend'), \
+                 patch('alert_workshop.verify_dependency', return_value='pinned'), \
+                 patch('alert_workshop.source_hashes', return_value={}):
+                evaluation = AlertEvaluation()
+            self.assertNotIn(root / 'validation', evaluation.forbidden)
+            self.assertNotIn(root / 'fixtures', evaluation.forbidden)
+            self.assertIn(root / 'alert_dataset.py', evaluation.forbidden)
+            self.assertIn(evaluation.root / 'expected.json', evaluation.forbidden)
 
     def test_comparison_rejects_regression_or_mismatched_inputs(self):
         rows = [{'version': v, 'case_id': c['id'], 'repeat': 1,

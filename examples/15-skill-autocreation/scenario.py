@@ -19,7 +19,7 @@ FUTURE_TASK = "构造服务 beta 出现类似连接池耗尽。请自行查找�
 ANSWER_FORMAT = "最后给JSON：branch为exception或early_return；leaked_connections与normal_leaked_connections来自异常及正常测试；note说明判断依据。"
 INITIAL_CASE = "alpha"
 FUTURE_CASES = [("beta", FUTURE_TASK)]
-FOCUS = """保留原生 _SKILL_REVIEW_PROMPT 的要求。从本次真实回执寻找有效技术、调试路径、工具经验与用户纠正。
+FOCUS = """本次复盘连接泄漏调查，从实际回执寻找有效技术、调试路径、工具经验与用户纠正。
 先 skills_list，再 skill_view 阅读最接近的现有方法，查重后再决定创建或不创建，不预设名称。
 Procedure first：主文件写通用步骤、判断条件与核验方法，教训嵌入相应步骤；工具字段与使用细节放 references/ 并在主文件引用。
 不要保存单次服务名、运行编号、临时环境错误或未经测试确认的失败操作。仅保存经过本次对照重放支持的方法；没有可靠流程就不创建。

@@ -7,12 +7,8 @@ import signal
 import time
 from pathlib import Path
 
-import gepa
 from support import HERE, LESSON18, body_hash, digest, read_skill, save, write_skill
-from adapter import OncallAdapter
 from dataset import SPLITS, validate_splits
-from reflection import ReflectionLM, connection
-from runner import HermesRunner
 
 
 def select_candidate(result, baseline):
@@ -40,6 +36,8 @@ def execution_protocol(model, endpoint, turns, provenance):
 
 
 def search(adapter, baseline, reflection_lm, root, max_metric_calls, iterations=1, minibatch=1, splits=None):
+    import gepa
+
     splits = SPLITS if splits is None else splits
     # 不向 GEPA 提供 holdout；接受检验和 Pareto 选择均使用官方实现。
     return gepa.optimize(
@@ -63,25 +61,57 @@ def search(adapter, baseline, reflection_lm, root, max_metric_calls, iterations=
     )
 
 
+def load_dataset(manifest):
+    if manifest:
+        from enterprise import load_manifest
+
+        return load_manifest(manifest)
+    validate_splits()
+    return SPLITS, {'kind': 'constructed_lesson18_cases'}
+
+
+def baseline_path(args):
+    if args.dataset_manifest and not args.skill:
+        raise ValueError('使用第19讲评测包时必须指定与monitor_query工具配套的 --skill')
+    return args.skill or HERE / 'skills/oncall-alert-triage/SKILL.md'
+
+
+def describe_inputs(splits, provenance, header, baseline):
+    groups = {split: {'count': len(cases), 'case_ids': [case['id'] for case in cases]}
+              for split, cases in splits.items()}
+    identity = {'pack_sha256': provenance['pack_sha256'], 'splits': groups} if 'pack_sha256' in provenance else splits
+    return {
+        'dataset_source': provenance,
+        'dataset_sha256': body_hash(json.dumps(identity, ensure_ascii=False, sort_keys=True)),
+        'baseline_skill_sha256': body_hash(header + baseline),
+        'splits': groups,
+    }
+
+
+def inspect_dataset(args):
+    header, baseline = read_skill(baseline_path(args))
+    splits, provenance = load_dataset(args.dataset_manifest)
+    return {'status': 'inputs_checked', 'model_requests': 0,
+            **describe_inputs(splits, provenance, header, baseline)}
+
+
 def run(args):
     if version('gepa') != '0.0.27':
         raise RuntimeError('本例固定 gepa==0.0.27，拒绝静默换用其他版本')
-    from adapter import business_grader
-    runner_type = HermesRunner
+    from adapter import OncallAdapter
+    from reflection import ReflectionLM, connection
+
+    seed_skill = baseline_path(args)
+    splits, provenance = load_dataset(args.dataset_manifest)
     if args.dataset_manifest:
-        from enterprise import EnterpriseRunner, business_grader, load_manifest
-        splits, provenance = load_manifest(args.dataset_manifest)
-        runner_type = EnterpriseRunner
-        if not args.skill:
-            raise ValueError('使用第19讲评测包时必须指定与monitor_query工具配套的 --skill')
+        from enterprise import EnterpriseRunner as runner_type, business_grader
     else:
-        validate_splits()
-        splits, provenance = SPLITS, {'kind': 'constructed_lesson18_cases'}
+        from adapter import business_grader
+        from runner import HermesRunner as runner_type
     if not args.probe and (args.metric_calls <= len(splits['validation'])
                           or min(args.sessions, args.reflections, args.iterations, args.minibatch) < 1):
         raise ValueError('预算必须为正，metric-calls 须大于初始验证题数，才能进入反思')
     model, endpoint = ('probe', 'not_connected') if args.probe else connection()
-    seed_skill = args.skill or HERE / 'skills/oncall-alert-triage/SKILL.md'
     header, baseline = read_skill(seed_skill)
     protocol = execution_protocol(model, endpoint, args.turns, provenance)
     root = HERE / 'runtime' / (time.strftime('%Y%m%d-%H%M%S') + '-' + secrets.token_hex(4))
@@ -101,7 +131,7 @@ def run(args):
                                 if args.dataset_manifest else None,
              'metric_calls': args.metric_calls, 'session_limit': args.sessions,
              'reflection_limit': args.reflections, 'iterations': args.iterations, 'minibatch': args.minibatch,
-             'baseline_sha256': body_hash(baseline), 'dataset_source': provenance})
+             'baseline_sha256': body_hash(baseline), **describe_inputs(splits, provenance, header, baseline)})
         save(root / 'dataset.json', splits)
         if args.probe:
             result = runner(task=splits['train'][0], skill_body=baseline, probe=True)
@@ -169,8 +199,10 @@ def main():
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, stop)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--live', action='store_true', help='明确允许本次模型调用')
-    parser.add_argument('--probe', action='store_true', help='配合dataset-manifest检查真实Hermes加载与隔离，不调用模型')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--live', action='store_true', help='明确允许本次模型调用')
+    mode.add_argument('--probe', action='store_true', help='配合dataset-manifest检查真实Hermes加载与隔离，不调用模型')
+    mode.add_argument('--inspect-dataset', action='store_true', help='列出固定题目划分与 Skill 指纹，不启动模型或 GEPA')
     parser.add_argument('--dataset-manifest', type=Path, help='第19讲pack及明确划分的三组题号')
     parser.add_argument('--skill', type=Path, help='本次优化的真实SKILL.md，保留文件头与正文')
     parser.add_argument('--metric-calls', type=int, default=8, help='GEPA 任务评分停止阈值，不是 API 请求数')
@@ -180,8 +212,14 @@ def main():
     parser.add_argument('--minibatch', type=int, default=1, help='同批比较父候选与新候选的训练题数')
     parser.add_argument('--turns', type=int, default=16, help='每次 Hermes 会话最多轮数')
     args = parser.parse_args()
-    if args.probe and (args.live or not args.dataset_manifest):
-        parser.error('--probe需要dataset-manifest且不能与live同时使用')
+    if args.inspect_dataset:
+        try:
+            print(json.dumps(inspect_dataset(args), ensure_ascii=False, indent=2))
+        except (OSError, RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        return
+    if args.probe and not args.dataset_manifest:
+        parser.error('--probe 需要 --dataset-manifest')
     if not args.live and not args.probe:
         parser.error('真实运行必须显式传入 --live；无费用检查请运行 bash run.sh --offline')
     if args.turns < 1:
