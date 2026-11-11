@@ -1,77 +1,54 @@
 # 综合实战｜双实例 On-call Agent
 
-先按[运行双实例演练](#运行双实例演练)复现本讲。入口是 [self_improvement_agent.py](self_improvement_agent.py)：两套独立的本地 HTTP 环境、两个持续巡检的 Hermes，默认由脚本模型驱动，工具调用、服务探测和 SkillClaw 原生归档实际执行。
+两个 Hermes 持续巡检两套独立 HTTP 环境。外部监控发出告警后，Agent 初判、从报告 Item fork 补查，并向值班工程师交接。恢复经过批准和双健康窗口验证；初判会话进入 SkillClaw，候选经独立评测后发布，再由下一轮任务证明实际采用。
 
-双轮验收以 A 的支付服务（`instance-a/payments`）和 B 的订单服务（`instance-b/orders`）为目标。第一轮分别注入持续失败与间歇失败，第二轮交换故障类型。每套环境还保留其他演练服务，供日常巡检抽查。
+| 你想做什么 | 入口 | 运行方式 |
+| --- | --- | --- |
+| 自动复现完整两轮流程 | [双实例演练](#运行双实例演练) | 默认脚本模型，无需密钥，完成后退出 |
+| 在业务页面操作完整系统 | [本地工作台](#启动本地工作台) | 加 `--solution`；持续运行，可选择脚本或真实模型 |
+| 从代码逐步搭建系统 | [四步实作](lab/README.md) | 工作台默认加载练习文件 |
+| 从终端持续值守 | [双实例持续值守](#双实例持续值守) | 手动注入故障，持续到 Ctrl-C |
+| 接入外部记忆、数据集与优化器 | [进阶实验](#进阶实验) | 基础流程跑通后按需选择 |
 
-原始初判 Session 进入 SkillClaw；从报告 Item fork 的补查分支用于事故处置、恢复验证和后续复盘。候选在独立冻结的持续失败、间歇失败、首次成功未复现三个现场中，与现行版从新会话开始成对评测。通过后发布正式版本，再核对两端新任务实际读取的 Skill 与新增探测；采用未获证实时保留待验证状态，采用失败时回退。
-
-业务工作台提供这套系统新增的操作与观察入口，共用原有 Skill、巡检和演化主链。它默认连接真实模型，便于持续对话和业务复核；复现本讲的受控两轮流程使用上面的脚本模型入口。下面的四步练习逐项搭建同一套系统，最终仍需核对完整的两轮发布与采用记录。
+完整入口是 [self_improvement_agent.py](self_improvement_agent.py)。每套环境包含订单、支付、库存和通知四个服务，演练以 A 的支付和 B 的订单为故障目标。第一轮分别注入持续与间歇失败，第二轮交换类型；冻结评测包含持续失败、间歇失败和首次成功未复现三个用例。
 
 ## 启动本地工作台
 
-需要边操作边观察时，再打开工作台。两套业务环境先接收请求，右侧 SRE Agent 起初离线，完成接入后持续巡检。
-
-从仓库根目录运行。需要 Git、Bash，以及 Python 3.12 或 `uv`。安装脚本会准备课程固定版本的 Hermes 和 SkillClaw。工作台默认连接真实模型，先准备本地配置：
+先在仓库根目录安装依赖：
 
 ```bash
 bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
-cp -n workshop/capstone/.env.example .env
 ```
 
-在仓库根目录的 `.env` 中填写 `GLM_API_KEY`。模板还提供 `GLM_MODEL` 和 `GLM_BASE_URL`，可以按自己的模型和端点调整。已有 `.env` 时只补齐这些字段。然后启动：
+直接观察完整参考系统，可先用脚本模型启动：
 
 ```bash
 .deps/hermes-agent/.venv/bin/python -B workshop/capstone/app.py \
-  --state workshop/capstone/runtime/workbench --port 8765
+  --solution --offline --state workshop/capstone/runtime/workbench --port 8765
 ```
 
-直接查看完整参考系统时，在启动命令后加 `--solution`；默认使用 `lab/self_improvement_agent.py` 供逐步实现。
+打开终端给出的地址，点击「启动 Agent」。先在「概览」「指标」「日志」「变更」看正常流量，再从「练习与运行」注入故障。调查交接后，在事故中「申请恢复」，核对范围与报告，再「批准并执行本地恢复」。两个独立健康窗口通过后，审批账本才关闭。Memory 和 Skill 学习页分别展示历史事实与方法版本。
 
-工作台先使用当前进程中的模型配置，再读取仓库根目录或 `workshop/capstone/` 下的 `.env`。配置保存在其他本地文件时，可加 `--env-file /path/to/local.env`。不要把本地配置文件提交到仓库。
+### 使用真实模型
 
-打开终端给出的地址。先看「概览」中的服务状态，再到「指标」「日志」「变更」检查同一现场。指标和日志来自本机 HTTP 请求；变更记录的是实际发生的环境启动与故障配置调整。初始没有事故时，可以先看正常流量。
+```bash
+cp -n workshop/capstone/.env.example .env
+```
 
-保持工作台运行，从仓库根目录打开 Codex、Claude Code 或其他 Coding Agent，先发送这一句：
+在仓库根目录 `.env` 中填写 `GLM_API_KEY`，按需设置 `GLM_MODEL` 和 `GLM_BASE_URL`，然后去掉启动命令中的 `--offline`。已有 `.env` 时只补齐字段，不要覆盖或提交本地配置。也可用 `--env-file /path/to/local.env` 指定其他配置文件；当前进程环境变量优先。
 
-> 先读取 workshop/capstone/lab/AGENTS.md。接下来帮我把 On-call Agent 接进工作台，每次只完成我当前提出的需求。
+真实模型模式支持跨业务页的持续问答和并行只读调查。「新建对话」创建独立会话。脚本模式会明确标识接线演示，不提供自由模型推理。完整受控双轮已用脚本模型验收，真实模型目前完成部分联调。
 
-随后按[逐步指南](lab/README.md)，一次交给它一个需求。它会实现同一份 `lab/self_improvement_agent.py`，自动运行检查并修正失败。你回到「练习与运行」，点击「启动 Agent」或「应用代码」，再去业务页面观察。
+### 逐步实现
 
-右侧的「SRE Agent」在各个业务页面共用同一段对话。你可以边看指标、日志和变更边继续问它，也可以点击「新建对话」，检验下一次任务是否查到了已经积累的经验。调查过程中的工具调用和并行调查结果会随对话展示，原始会话可从「执行证据」打开。
-
-| 你交给 Coding Agent 的需求 | 回到工作台做什么 |
-| --- | --- |
-| 让 Agent 上线并持续巡检 | 看服务检查时间持续更新，问它现在有哪些异常 |
-| 让它接手告警、调查并通知我 | 制造故障，观察调查与交接，继续追问判断依据 |
-| 让它记住事故并在新任务中检索 | 复盘恢复后的事故，开一段新对话核对历史和当前状态 |
-| 让团队从事故改进 Skill，评测后在下一轮采用 | 看候选与成对评测，再用新事故检查实际采用 |
-
-「练习与运行」集中放置实现进度、检查记录、Agent 控制、故障注入与恢复申请。运行中的业务页面保留当前对话，你可以随时回到它们继续调查。每次检查会记录所用实现的内容指纹；修改后的代码需要重新通过检查并应用，才算进入当前运行。
-
-需要清除实验故障时，在已经完成工程师交接的事故上点击「申请恢复」，在「批准恢复」中核对绑定的事故、环境、服务和调查报告，再点「批准并执行本地恢复」。审批与执行分别留存回执，页面先进入「恢复验证中」，后续巡检确认两个独立健康窗口后才标为已恢复。
-
-仅核对安装与接线时，在启动命令后加 `--offline`。离线模式中的 HTTP、Hermes 工具和会话存储实际运行，模型回答由本机脚本提供，页面会标明该模式。自由问答使用默认的真实模型模式。检查与调查会保存各自的运行记录，真实模型与离线接线的结果分别记录。
+去掉 `--solution`，工作台会加载 `lab/self_improvement_agent.py`。从仓库根目录打开 Coding Agent，让它先读 [lab/AGENTS.md](lab/AGENTS.md)，再按[四步实作指南](lab/README.md)逐项实现、检查并应用代码。
 
 ## 完整参考运行
 
-[self_improvement_agent.py](self_improvement_agent.py) 是本讲完整参考系统的受控入口，负责两轮故障交换、巡检、调查交接、会话归档、独立评测、Skill 发布和新现场采用验证。持续对话和工作台中的附加复核沿用这些证据；完整验收按下面的两轮命令执行。
+自动演练与持续工作台共用巡检、调查和演化主链。[`service-patrol`](patrol/skills/service-patrol/SKILL.md) 控制例行巡检，[`oncall-alert-triage`](patrol/skills/oncall-alert-triage/SKILL.md) 控制告警初判与补查。
 
-| 你想观察什么 | 从哪里开始 | 运行到哪里 |
-| --- | --- | --- |
-| 持续运行两个 Hermes，手动注入故障，观察独立交接与后台学习 | [双实例持续值守](#双实例持续值守) | 启动两套环境、两个 Agent 和 Client Proxy，持续到按 Ctrl-C |
-| 自动验证故障处理、跨实例学习、发布和实际采用 | [运行双实例演练](#运行双实例演练) | 自动注入故障、模拟授权恢复并核对版本采用，两轮完成后退出 |
-
-[课程总装方案与第 10—23 讲计划验收项](INTEGRATION-PLAN.md)
-
-[`service-patrol`](patrol/skills/service-patrol/SKILL.md) 定义例行巡检的取数、历史检索和报告。Hermes 每轮通过 `patrol_skill_view` 读取它。收到异常后，同一回合用 `skill_view` 读取 [`oncall-alert-triage`](patrol/skills/oncall-alert-triage/SKILL.md)，按照该 Skill 完成初判和后续交接。
-
-| 阶段 | 要交付的能力 | 实作状态 |
-| --- | --- | --- |
-| 一 · 持续巡检 | 定时抽查、按需检索、从服务检查点恢复和 fork | [巡检模块](patrol/README.md) |
-| 二 · On-call 调查与处置 | 向正在运行的 Hermes 投递告警，从事故报告 fork 补查，审批处置并确认恢复 | [故障注入与调查实作](patrol/ONCALL.md) |
-| 三 · 从值守中改进 | 聚合多实例会话，回放评测、发布并验证后续采用 | [完整实现](self_improvement_agent.py) |
+模块说明：[巡检与检查点](patrol/README.md) · [告警与调查](patrol/ONCALL.md) · [课程能力映射](INTEGRATION-PLAN.md)
 
 ## 运行双实例演练
 
@@ -99,6 +76,9 @@ bash scripts/setup_skillclaw.sh
 演化或评测异常会在 `learning_errors` 中留下原因，本轮最终状态保留为 `learning_failed`。正式版本保留或恢复完成后，巡检继续运行，受控演练仍可收集下一轮事故证据。若部分发布后的恢复未完成，编排器停止追加故障并保留已有证据。完整成功审计会将这类运行判为未完成。
 
 ### 演练各阶段与完整证据
+
+<details>
+<summary>展开阶段说明与产物索引</summary>
 
 实验环境模拟告警日志监控服务，注入故障后发出带事故 ID 的告警。Harness 收到告警后，通过 steer 将原始事件交给当前巡检回合。Hermes 读取获准的 `oncall-alert-triage` Skill，按它完成初判、补查和交接。初判落盘后，Hermes 从事故报告 Item fork，重新读取同一版 Skill，给出调查结论和恢复方案。方案及源 Session、报告 Item 写入实验内的工程师通知记录，并在终端显示通知。收到这份交接回执后，原巡检进程继续检查服务。每轮进入 SkillClaw 的是两个由 Client Proxy 归档的初判会话。
 
@@ -135,6 +115,8 @@ bash scripts/setup_skillclaw.sh
 | `round-*/evaluation/evaluation.json` | 有候选时生成，含新旧版本的逐题工具证据和门槛决定 |
 | `round-*/recovery.json` | 两端关闭事故时的最终恢复窗口 |
 | `http-workset.json` | 完成演练后生成的 HTTP 工作样本，每起事故一条 |
+
+</details>
 
 ## 双实例持续值守
 
@@ -193,7 +175,11 @@ ENV_SCRIPT=workshop/capstone/patrol/environment.py
 
 持续模式覆盖核心值守与后台学习。Memory 迁移、恢复复核 Skill、GEPA、OpenViking 和 Langfuse 等综合能力通过受控双轮演练验证。`--serve` 与 `--gepa`、`--enterprise`、`--langfuse`、`--openviking`、`--rehearse-rollback` 分别运行，CLI 会拒绝将持续模式与这些受控演练参数混用。
 
-## 用 OpenViking 做跨实例交班
+## 进阶实验
+
+以下接入按需选择，不是启动基础系统的前置条件。
+
+### 用 OpenViking 做跨实例交班
 
 先按第 14 讲启动原生 OpenViking 服务。在运行参考实现的终端设置 `OPENVIKING_ENDPOINT`，指向服务的回环根地址，并设置同一授权范围的 `OPENVIKING_ACCOUNT` 和 `OPENVIKING_USER`。启用鉴权的服务还需设置 `OPENVIKING_API_KEY`。资料索引与检索会用到服务配置的模型。[第 14 讲服务启动](../../examples/14-external-memory-provider/OPENVIKING.md#运行原生-openviking)
 
@@ -208,7 +194,7 @@ ENV_SCRIPT=workshop/capstone/patrol/environment.py
 
 配好后面各节的依赖和服务后，可以在同一次演练中使用 `--openviking --enterprise --gepa --langfuse`。总报告分别链接交班、根因评测和 GEPA 对照，Langfuse Trace 用下文的独立命令取回核对。
 
-## 把巡检事故做成根因评测题
+### 把巡检事故做成根因评测题
 
 完成前面的依赖安装后，用新目录运行。
 
@@ -264,7 +250,7 @@ RUN=workshop/capstone/runtime/fanout
 
 两版 Skill 在同一份开发题上比较。候选只增加一条规则，要求逐服务核对链路、确认共同根因并检查健康对照。报告即使写对了两个服务，也要取得各自的精确查询回执才能通过。开发集有合格版本时，才锁定该版本并在独立留出题上用新 Hermes Session 回放。在 `report.json` 核对结果和 Skill 哈希，再按其中的路径回查工具 Item。本机脚本模型用于验证接线和评分，可显式加 `--live` 评估模型的实际调查表现。
 
-## 把巡检与分支记录接入 Langfuse
+### 把巡检与分支记录接入 Langfuse
 
 在自己的教学项目中设置 `LANGFUSE_PUBLIC_KEY`、`LANGFUSE_SECRET_KEY` 和 `LANGFUSE_BASE_URL`。用第 19 讲的安装入口准备隔离 SDK。在仓库根目录运行下面的命令。[自部署方式](../../examples/19-enterprise-dataset/selfhost/README.md)
 
@@ -289,7 +275,7 @@ RUN=workshop/capstone/runtime/fleet-langfuse
 
 只核对采集时，传 `--run` 和 `--out` 即可。从 `trace-index.json` 查每个 Trace 的事故、Session、报告 Item 和工具核对结果。发布与回取通过后，把输出中的 `restored/pack.json` 交给同一个 `enterprise_replay.py` 重新调查。
 
-## 用 GEPA 做一轮离线对照
+### 用 GEPA 做一轮离线对照
 
 第 20 讲用工具回执和评分解释来搜索 Skill 正文。这里用双实例演练第一轮的种子 `oncall-alert-triage` 做同样的实验。GEPA 与 SkillClaw 从完全相同的 Skill 文件开始，分别从冻结回放题和现场归档学习。
 
@@ -317,7 +303,7 @@ fi
 
 先在 `round-1/gepa/report.json` 核对题目划分、搜索预算、验证得分和候选哈希。若有候选，再去 `round-1/gepa/release/evaluation.json` 与 `round-1/gepa/holdout/evaluation.json` 比较逐题结果。挑一题首次返回 5xx 的回放，核对新旧版本实际读取的 Skill、探测次数和结论。GEPA 结果用于离线对照，正式版本和第二轮采用由同轮 SkillClaw 的发布流程决定，可在总 `report.json` 中核对两端实际读取的哈希。
 
-## 回退后用新巡检验证实际加载
+### 回退后用新巡检验证实际加载
 
 用新的运行目录开启回退演练。
 
@@ -330,7 +316,9 @@ fi
 
 总 `report.json` 的 `rollback` 记录正式发布回执，`rollback_rehearsal.patrol_evidence` 指向两个新巡检。演练结束会清理这次注入的本地故障。回退巡检的会话归档用于验收，演化与企业题包继续使用主流程的两轮事故。没有形成可回退的正式发布时，验收会保留待验证项。
 
-## 核对同一次演练的证据
+## 证据检查与回放
+
+### 核对同一次演练的证据
 
 用已完成的演练目录运行只读验收，JSON 报告输出到终端。
 
@@ -347,7 +335,7 @@ fi
 
 自动化验收时，可重复传入 `--require` 指定必须通过的检查。持续巡检使用 `--require core.continuous_patrol`，回退演练使用 `--require core.rollback`。指定的检查缺失、待验证或未启用时，JSON 仍会输出，命令以退出码 2 结束。
 
-## 回放一次已完成的事故初判
+### 回放一次已完成的事故初判
 
 打开运行目录的 `http-workset.json`，选一条 `cases` 记录。用这条记录的 `incident_id` 和 `skill_sha256` 替换下面的示例值，使用当时读到的 Skill 复跑。`--out` 使用新目录。
 
