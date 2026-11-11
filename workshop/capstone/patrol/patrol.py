@@ -404,16 +404,22 @@ def run(state, db, sessions, options, interval, sample, rounds, oncall, *,
                         pending = read_alert(
                             environment_state, service,
                             seen_ids={item["incident_id"] for item in incidents(db, service)},
+                            environment_id=get_snapshot(environment_state, service)["environment_id"],
                         ) if capture_session else None
-                        selected_alert = None
+                        # A proxy-captured incident needs a fresh Session and its
+                        # native ID header from the first model request onward.
+                        # An alert arriving during this ordinary patrol Turn is
+                        # picked up on the next Turn, before those choices are made.
+                        selected_alert = (pending or {}) if capture_session else None
                         if incident_id is not None:
                             selected_alert = load_json(environment_state / "alerts" / service / f"{incident_id}.json")
+                        capture_incident = capture_session and bool(selected_alert)
                         record = inspect_service(
                             sessions, db, service, environment_state, options, skill_sha,
                             patrol_skill_sha=patrol_skill_sha,
-                            capture_session=capture_session and pending is not None, langfuse=langfuse,
+                            capture_session=capture_incident, langfuse=langfuse,
                             auto_recover=not page_oncall, route_alert=route_alert,
-                            fresh_session=capture_session and pending is not None,
+                            fresh_session=capture_incident,
                             incoming_alert=selected_alert,
                         )
                     if record is not None:

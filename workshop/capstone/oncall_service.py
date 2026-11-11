@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack, closing, contextmanager
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -18,10 +19,36 @@ sys.path.insert(0, str(HERE / "patrol"))
 from environment import SERVICES, load_json, write_json
 from fleet import GROUP, SEED, receipt, sha256
 from hermes_runtime import ONCALL_SKILL, ensure_loopback_no_proxy
+from implementation import load_implementation
 from patrol import connect, incidents, model_connection
 from skillclaw_bridge import _bound_port, incident_archive
 
 ALIASES = ("instance-a", "instance-b")
+
+
+def patrol_configuration(implementation):
+    module = load_implementation(implementation)
+    config = {"services": list(SERVICES), "sample": 2, "interval": 1}
+    configure = getattr(module, "patrol_config", None)
+    if configure is not None:
+        if not callable(configure):
+            raise ValueError("patrol_config must be a function")
+        supplied = configure()
+        if not isinstance(supplied, dict) or set(supplied) - config.keys():
+            raise ValueError("patrol_config must return services, sample and interval settings")
+        config.update(supplied)
+    services = config["services"]
+    if (not isinstance(services, (list, tuple)) or not services
+            or any(not isinstance(service, str) or service not in SERVICES for service in services)
+            or len(set(services)) != len(services)):
+        raise ValueError("patrol_config services must be a nonempty list of unique lab services")
+    sample = config["sample"]
+    if type(sample) is not int or not 1 <= sample <= len(services):
+        raise ValueError("patrol_config sample must be an integer within the selected service count")
+    interval = config["interval"]
+    if type(interval) not in (int, float) or not math.isfinite(interval) or interval <= 0:
+        raise ValueError("patrol_config interval must be a finite positive number")
+    return {"services": list(services), "sample": sample, "interval": interval}
 
 
 def stop_process(child):
@@ -217,10 +244,11 @@ def select_batch(root, state, completed):
     return selected if set(selected) == set(ALIASES) else None
 
 
-def learn(root, live):
+def learn(root, live, implementation=None):
     from fleet_eval import evaluate
     from skillclaw_evolve import evolve
 
+    module = load_implementation(implementation or HERE / "self_improvement_agent.py")
     status_path = root / "learning" / "state.json"
     state = load_json(status_path)
     recover_publication(root, state)
@@ -251,7 +279,8 @@ def learn(root, live):
                                                       options if live else None)
                         result["evolution"] = evolution
                         if candidate is not None:
-                            evaluation = evaluate(work / "evaluation", baseline, candidate, options)
+                            evaluation = evaluate(work / "evaluation", baseline, candidate, options,
+                                                  release_policy=module.release_policy)
                             result["evaluation"] = evaluation
                             if evaluation["passed"]:
                                 digest = evaluation["candidate_sha256"]
@@ -292,26 +321,47 @@ def learn(root, live):
             time.sleep(2)
 
 
-def serve(root, live, implementation):
+def serve(root, live, implementation, *, environment_states=None, oncall=True, learning=True):
     ensure_loopback_no_proxy()
+    root = Path(root).resolve()
+    implementation = Path(implementation).resolve()
+    patrol_config = patrol_configuration(implementation)
+    attached = environment_states is not None
+    if attached:
+        if set(environment_states) != set(ALIASES):
+            raise ValueError("Provide an environment directory for both instance-a and instance-b")
+        environment_states = {alias: Path(path).resolve() for alias, path in environment_states.items()}
+        if len(set(environment_states.values())) != len(ALIASES):
+            raise ValueError("Each instance requires a separate HTTP environment")
+    else:
+        environment_states = {alias: root / "environments" / alias for alias in ALIASES}
+    learning_enabled = learning and oncall
     root.mkdir(parents=True, exist_ok=False)
     (root / "learning").mkdir()
-    status = {"status": "starting", "mode": "live" if live else "local-script-model", "root": str(root)}
+    status = {"status": "starting", "mode": "live" if live else "local-script-model", "root": str(root),
+              "environments": {alias: str(path) for alias, path in environment_states.items()},
+              "environment_ownership": "external" if attached else "service",
+              "patrol_config": patrol_config,
+              "oncall_enabled": oncall, "learning_enabled": learning_enabled, "learner_pid": None}
     status_path = root / "service.json"
     try:
         with model_connection(not live) as url, ExitStack() as stack:
             options = {"base_url": url, "api_key": os.environ["GLM_API_KEY"] if live else "local-fixture",
                        "model": os.environ.get("GLM_MODEL", "glm-5.2") if live else "patrol-fixture"}
             publish(root, SEED, sha256(SEED))
-            write_json(root / "learning" / "state.json", {"status": "waiting", "active_sha256": sha256(SEED),
+            write_json(root / "learning" / "state.json", {"status": "waiting" if learning_enabled else "disabled",
+                                                           "active_sha256": sha256(SEED),
                                                            "processed_sessions": [], "attempts": {}})
             workers, environments = {}, {}
             for alias in ALIASES:
-                environment = root / "environments" / alias
-                environment.mkdir(parents=True)
-                environments[alias] = start_process(stack, [sys.executable, "-B", str(HERE / "patrol/environment.py"),
-                                                            "--state", str(environment), "serve"],
-                                                   environment / "environment.log")
+                environment = environment_states[alias]
+                if not attached:
+                    environment.mkdir(parents=True)
+                    environments[alias] = start_process(stack, [sys.executable, "-B", str(HERE / "patrol/environment.py"),
+                                                                "--state", str(environment), "serve"],
+                                                       environment / "environment.log")
+                elif not (environment / "environment.json").is_file():
+                    raise RuntimeError(f"{alias}: start the external HTTP environment before attaching")
                 deadline = time.monotonic() + 30
                 while not (environment / "environment.json").is_file():
                     if environments[alias].poll() is not None or time.monotonic() >= deadline:
@@ -322,19 +372,24 @@ def serve(root, live, implementation):
                 worker = root / "patrols" / alias
                 worker.mkdir(parents=True)
                 command = [sys.executable, "-B", str(HERE / "patrol/patrol.py"), "--state", str(worker),
-                           "run", "--oncall", "--page-oncall", "--environment-state", str(environment),
+                           "run", "--environment-state", str(environment),
                            "--skill-file", str(receiver / ONCALL_SKILL / "SKILL.md"), "--capture-url", proxy,
-                           "--interval", "1", "--implementation", str(implementation)]
+                           "--interval", str(patrol_config["interval"]), "--sample", str(patrol_config["sample"]),
+                           "--implementation", str(implementation)]
+                for service in patrol_config["services"]:
+                    command.extend(("--service", service))
+                if oncall:
+                    command.extend(("--oncall", "--page-oncall"))
                 if not live:
                     command.append("--offline")
                 workers[alias] = start_process(stack, command, worker / "patrol.log")
-            command = [sys.executable, "-B", str(Path(__file__).resolve()), "--out", str(root), "--learn-worker"]
+            command = [sys.executable, "-B", str(Path(__file__).resolve()), "--out", str(root), "--learn-worker",
+                       "--implementation", str(implementation)]
             if live:
                 command.append("--live")
-            learner = start_process(stack, command, root / "learning" / "worker.log")
+            learner = start_process(stack, command, root / "learning" / "worker.log") if learning_enabled else None
             status.update(status="running", workers={alias: process.pid for alias, process in workers.items()},
-                          environments={alias: str(root / "environments" / alias) for alias in ALIASES},
-                          learner_pid=learner.pid)
+                          learner_pid=learner.pid if learner is not None else None)
             write_json(status_path, status)
             print(f"On-call service running. State: {root}", flush=True)
             restarts = 0
@@ -342,11 +397,11 @@ def serve(root, live, implementation):
                 for alias, process in {**environments, **{f"{alias}-patrol": child for alias, child in workers.items()}}.items():
                     if process.poll() is not None:
                         raise RuntimeError(f"{alias} stopped with exit code {process.returncode}")
-                if learner.poll() is not None and restarts < 3:
+                if learner is not None and learner.poll() is not None and restarts < 3:
                     restarts += 1
                     learner = start_process(stack, command, root / "learning" / "worker.log")
                     status.update(learner_pid=learner.pid, learner_restarts=restarts)
-                status.update(learning_available=learner.poll() is None, updated_at=time.time())
+                status.update(learning_available=learner is not None and learner.poll() is None, updated_at=time.time())
                 write_json(status_path, status)
                 time.sleep(1)
     except (KeyboardInterrupt, SystemExit):
@@ -364,13 +419,23 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="New directory for this continuous service")
     parser.add_argument("--live", action="store_true", help="Use the configured model instead of local scripted responses")
     parser.add_argument("--implementation", type=Path, default=HERE / "self_improvement_agent.py")
+    parser.add_argument("--environment-a", type=Path, help="Attach to an already running instance-a environment")
+    parser.add_argument("--environment-b", type=Path, help="Attach to an already running instance-b environment")
+    parser.add_argument("--patrol-only", action="store_true", help="Run scheduled inspections before enabling On-call handling")
+    parser.add_argument("--no-learning", action="store_true", help="Run On-call workers without the background learner")
     parser.add_argument("--learn-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     ensure_loopback_no_proxy()
+    if (args.environment_a is None) != (args.environment_b is None):
+        parser.error("--environment-a and --environment-b must be provided together")
     if args.learn_worker:
-        learn(args.out.resolve(), args.live)
+        learn(args.out.resolve(), args.live, args.implementation.resolve())
     else:
-        serve(args.out.resolve(), args.live, args.implementation.resolve())
+        environments = None if args.environment_a is None else {
+            "instance-a": args.environment_a, "instance-b": args.environment_b,
+        }
+        serve(args.out.resolve(), args.live, args.implementation.resolve(), environment_states=environments,
+              oncall=not args.patrol_only, learning=not args.no_learning)
 
 
 if __name__ == "__main__":

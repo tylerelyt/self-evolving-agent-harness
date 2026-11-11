@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>On-call 工作台 · 自进化 Agent 实战</title>
+  <style>
+    :root { --ink:#203b35; --muted:#6d7d77; --green:#167b65; --paper:#f6f7f3; --line:#dce3dc; --amber:#a75629; --red:#b44a40; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+    button,input,select,textarea { font:inherit; }
+    button { cursor:pointer; border:1px solid var(--line); color:var(--ink); background:white; border-radius:7px; padding:8px 13px; }
+    button:hover { border-color:var(--green); }
+    button:disabled { opacity:.45; cursor:default; }
+    button.primary { background:var(--green); color:white; border-color:var(--green); }
+    button.small { padding:4px 9px; font-size:12px; }
+    header { background:white; border-bottom:1px solid var(--line); padding:20px 32px; display:flex; justify-content:space-between; align-items:center; gap:20px; }
+    .eyebrow { color:var(--green); font-size:11px; font-weight:700; letter-spacing:1.4px; }
+    h1 { font-size:24px; margin:3px 0 0; letter-spacing:-.4px; }
+    h2 { margin:0; font-size:19px; } h3 { margin:0 0 12px; font-size:15px; }
+    p { margin:8px 0; } .muted { color:var(--muted); } .tiny { font-size:12px; }
+    .header-meta { display:flex; gap:12px; align-items:center; }
+    .badge { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:5px; background:#eef1eb; font-size:12px; white-space:nowrap; }
+    .badge.good { color:#12674e; background:#e5f2e9; } .badge.warn { color:var(--amber); background:#fcf0df; } .badge.bad { color:var(--red); background:#fae9e5; }
+    .shell { display:grid; grid-template-columns:255px minmax(0,1fr); max-width:1660px; margin:auto; min-height:calc(100vh - 92px); }
+    aside { border-right:1px solid var(--line); padding:28px 20px; }
+    .stage { display:block; width:100%; padding:13px 12px; text-align:left; margin:9px 0; background:transparent; border-color:transparent; }
+    .stage.active { background:white; border-color:#a4c8b6; box-shadow:0 3px 12px #203b3506; }
+    .stage-num { color:var(--green); font-size:11px; font-weight:700; }
+    .stage-name { font-weight:650; margin:3px 0 7px; line-height:1.5; }
+    .side-note { margin-top:27px; border-top:1px solid var(--line); padding-top:18px; }
+    main { min-width:0; padding:26px 30px 40px; }
+    .control { background:white; border:1px solid var(--line); border-radius:10px; padding:19px 22px; }
+    .control-top { display:flex; gap:16px; justify-content:space-between; align-items:center; }
+    .buttons { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .code-path { font:12px/1.6 ui-monospace,SFMono-Regular,monospace; color:var(--muted); word-break:break-all; margin-top:12px; }
+    .guide { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:center; margin-top:16px; border-top:1px solid var(--line); padding-top:14px; }
+    #guide-text { margin:0; }
+    .tabs { display:flex; gap:25px; border-bottom:1px solid var(--line); margin:24px 0 20px; }
+    .tab { border:0; border-radius:0; padding:9px 0 12px; background:transparent; color:var(--muted); }
+    .tab.active { border-bottom:2px solid var(--green); color:var(--green); font-weight:650; }
+    .page[hidden] { display:none; }
+    .section-head { display:flex; align-items:center; gap:15px; justify-content:space-between; margin-bottom:14px; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+    .stat { background:white; border:1px solid var(--line); border-radius:9px; padding:15px 18px; }
+    .stat strong { display:block; font-size:26px; font-weight:650; line-height:1.4; margin-top:4px; }
+    .instances { display:grid; grid-template-columns:1fr 1fr; gap:17px; }
+    .card { background:white; border:1px solid var(--line); border-radius:10px; padding:19px 21px; min-width:0; }
+    .service { padding:13px 0; border-top:1px solid #edf0e9; }
+    .service-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .service-name { font-weight:650; }
+    .metrics { display:grid; grid-template-columns:1fr 1fr 1fr 90px; align-items:end; margin:8px 0; gap:8px; }
+    .metric-label { font-size:11px; color:var(--muted); }
+    .metric-value { font-size:17px; }
+    .spark { width:85px; height:32px; }
+    .fault-actions { display:flex; gap:5px; margin-top:9px; }
+    .fault-actions button { font-size:11px; padding:3px 7px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .feed { margin-top:20px; }
+    .event { display:flex; gap:13px; border-top:1px solid #edf0e9; padding:8px 0; }
+    .event time { color:var(--muted); min-width:67px; font-variant-numeric:tabular-nums; font-size:12px; }
+    .empty { color:var(--muted); padding:25px 0; }
+    .split { display:grid; grid-template-columns:280px minmax(0,1fr); gap:16px; }
+    .incident { width:100%; text-align:left; margin:0 0 8px; padding:13px; }
+    .incident.selected { border-color:var(--green); background:#eff6f0; }
+    .incident .tiny { overflow-wrap:anywhere; }
+    .timeline { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0; }
+    .timeline span { border:1px solid var(--line); border-radius:6px; padding:5px 9px; font-size:12px; }
+    .timeline .done { color:var(--green); background:#f0f7f0; border-color:#c8dfce; }
+    pre { white-space:pre-wrap; word-break:break-word; font:12px/1.65 ui-monospace,SFMono-Regular,monospace; background:#f5f7f2; border:1px solid #e6eae2; border-radius:6px; padding:12px; overflow:auto; max-height:400px; }
+    .session-grid { margin-top:18px; }
+    .message { border-top:1px solid var(--line); padding:13px 0; }
+    .message-label { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--green); font-weight:700; }
+    .report { white-space:pre-wrap; }
+    .probes { display:flex; gap:7px; align-items:center; margin:12px 0; }
+    .probe { background:#f8eadf; color:var(--amber); border-radius:6px; padding:4px 12px; font-weight:700; }
+    textarea { width:100%; min-height:76px; border:1px solid var(--line); border-radius:7px; padding:10px; resize:vertical; background:white; color:var(--ink); }
+    .question-box { margin-top:20px; border-top:1px solid var(--line); padding-top:16px; }
+    .memory-card { margin-top:12px; }
+    .evaluation { border-collapse:collapse; width:100%; margin:12px 0; }
+    .evaluation th,.evaluation td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
+    .evaluation th { font-size:12px; color:var(--muted); }
+    details { margin-top:12px; } summary { cursor:pointer; color:var(--muted); }
+    #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#203b35; color:white; padding:11px 20px; border-radius:8px; box-shadow:0 5px 22px #0002; z-index:5; display:none; max-width:75vw; }
+    #connection { font-size:12px; color:var(--muted); }
+    @media(max-width:1080px) { header{padding:18px 22px}.shell{grid-template-columns:220px 1fr}main{padding:22px 20px}.instances{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr 1fr 90px}.control-top{align-items:flex-start;flex-direction:column} }
+    @media(max-width:720px) { .shell{display:block}aside{padding:16px;border-right:0;border-bottom:1px solid var(--line)}#stages{display:grid;grid-template-columns:1fr 1fr;gap:5px}.stage{margin:0;padding:8px}.side-note{display:none}.header-meta{flex-direction:column;align-items:flex-end;gap:3px}header{padding:14px}main{padding:18px 14px}.guide{grid-template-columns:1fr}.tabs{gap:16px}.stats{gap:8px} }
+  </style>
+</head>
+<body>
+<header>
+  <div><div class="eyebrow">SELF-EVOLVING AGENT HARNESS</div><h1>On-call 工作台</h1></div>
+  <div class="header-meta"><span id="model" class="badge">连接中</span><span id="connection">等待服务现场</span></div>
+</header>
+<div class="shell">
+  <aside>
+    <div class="eyebrow">搭建你的 AGENT</div>
+    <p class="muted tiny">每完成一关，回到这里观察它的变化。</p>
+    <div id="stages"></div>
+    <div class="side-note tiny muted">指标来自本机 HTTP 请求。调查、会话与学习结果来自当前运行记录。<p id="workspace"></p></div>
+  </aside>
+  <main>
+    <section class="control">
+      <div class="control-top">
+        <div><div class="row"><h2 id="agent-title">Agent 等待接入</h2><span id="agent-status" class="badge">离线</span></div><p id="agent-note" class="muted tiny">服务现场已准备好，先让巡检 Agent 上线。</p></div>
+        <div class="buttons"><button id="start" class="primary" data-action="agent_start">启动 Agent</button><button id="restart" data-action="restart">应用代码</button><button id="stop" data-action="agent_stop">停止 Agent</button></div>
+      </div>
+      <div id="code-path" class="code-path"></div>
+      <div class="guide"><p id="guide-text"></p><div class="buttons"><button id="copy-prompt">复制本关提示词</button><button id="check" class="primary">运行本关检查</button></div></div>
+      <details id="check-details"><summary>本关验收记录</summary><div id="checks"></div></details>
+    </section>
+    <nav class="tabs" aria-label="工作台分区">
+      <button class="tab active" data-tab="overview">服务现场</button><button class="tab" data-tab="incidents">事故与调查 <span id="incident-count"></span></button><button class="tab" data-tab="memory">Memory</button><button class="tab" data-tab="learning">Skill 学习</button>
+    </nav>
+    <section id="overview" class="page">
+      <div id="stats" class="stats"></div><div id="instances" class="instances"></div>
+      <div class="card feed"><h3>工作台事件</h3><div id="events"></div></div>
+    </section>
+    <section id="incidents" class="page" hidden>
+      <div class="section-head"><h2>事故与调查</h2><div class="buttons"><button id="live-incidents" class="small primary">现场事故</button><button id="check-incidents" class="small">检查样本</button></div></div>
+      <div class="split"><div id="incident-list"></div><div class="card"><div id="incident-detail" class="empty">注入一次故障，或打开一次验收产生的事故。</div>
+        <div id="question-box" class="question-box" hidden><h3>继续问 Agent</h3><textarea id="question" placeholder="为什么作出这个判断？接下来还需要哪些证据？"></textarea><div class="buttons" style="margin-top:8px"><button id="ask" class="primary">发送追问</button><span class="muted tiny">从这次初判报告打开独立会话</span></div><div id="answers"></div></div>
+      </div></div>
+      <div id="session-panel" class="card session-grid" hidden><div class="section-head"><h3 id="session-title">执行轨迹</h3><button id="close-session" class="small">收起</button></div><div id="messages"></div></div>
+      <div class="card feed"><h3>最近的会话</h3><div id="sessions"></div></div>
+    </section>
+    <section id="memory" class="page" hidden>
+      <div class="section-head"><h2>Memory</h2><button id="review-memory" class="primary">复盘已恢复事故</button></div>
+      <p class="muted">从已完成的事故保留有来源的事实。新会话先查询历史，再独立检查当前 HTTP 指标。</p><div id="memory-content"></div>
+    </section>
+    <section id="learning" class="page" hidden>
+      <div class="section-head"><h2>Skill 学习</h2><span id="learning-status" class="badge">等待接入</span></div>
+      <p class="muted">事故会话 → 候选 → 独立回放 → 发布 → 下一次实际采用</p><div id="learning-content"></div>
+    </section>
+  </main>
+</div>
+<div id="toast" role="status"></div>
+<script>
+  let state = null;
+  let stage = 1;
+  let selectedIncident = null;
+  let detailVersion = null;
+  let busy = false;
+  let activeTab = 'overview';
+  let incidentScope = 'live';
+  function incidentRows() { return state.incidents.filter(item => item.source.startsWith('check:') === (incidentScope==='checks')); }
+  const labels = {healthy:'健康',abnormal:'异常',insufficient:'样本不足',unavailable:'不可用',offline:'离线',unimplemented:'待实现',unchecked:'待检查',completed:'已完成',recalled:'已召回',ready:'可用',empty:'暂无事实',running:'运行中',starting:'启动中',stopped:'已停止',failed:'失败',passed:'通过',pending:'等待',waiting:'等待经历',disabled:'未接入',evaluating:'评测中',published:'已发布',keep:'保留现行版',rejected:'拒绝候选',awaiting_adoption:'等待采用验证',adopted:'已采用',rolled_back:'已回退',recovered:'已恢复',handed_off:'已交接',investigating:'调查中',interrupted:'已中断',error:'异常'};
+  const prompts = ['先让巡检 Agent 上线。实现 patrol_config，定义负责的服务、每轮抽查数量和间隔。', '让 Agent 接手监控告警，从初判报告 fork 补查，page 值班工程师后继续巡检。', '让新会话用上之前的事故经验，实际读取 Memory 并检查当前现场。', '把事故经历接进 Skill 学习，用独立评测决定是否发布，再验证下一次实际采用。'];
+  const observations = ['先让巡检 Agent 上线，观察两个实例怎样轮流检查服务。','注入一次持续或间歇故障，查看初判、补查和工程师交接。','恢复一次故障后复盘，在新会话里核对历史事实和当前现场。','两端事故恢复后观察候选与评测，再注入新故障验证采用。'];
+  function $(id) { return document.getElementById(id); }
+  function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function pretty(value) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
+  function short(value) { if (!value) return '—'; value=String(value); return value.startsWith('patrol-') && value.length>24 ? value.slice(0,value.lastIndexOf('-'))+'…'+value.slice(-6) : value.slice(0,12); }
+  function time(value) { return value ? new Date(value * 1000).toLocaleTimeString('zh-CN',{hour12:false}) : '—'; }
+  function badge(value) { const tone = ['healthy','passed','adopted','recovered'].includes(value) ? 'good' : ['failed','abnormal','error'].includes(value) ? 'bad' : ['waiting','awaiting_adoption','investigating','insufficient'].includes(value) ? 'warn' : ''; return '<span class="badge '+tone+'">'+escapeHtml(labels[value] || value || '等待')+'</span>'; }
+  function toast(message) { $('toast').textContent = message; $('toast').style.display = 'block'; clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').style.display = 'none', 4500); }
+  async function api(path, body) { const response = await fetch(path, body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const data = await response.json(); if (!response.ok) throw new Error(data.error || '请求失败'); return data; }
+  async function action(body) { if (busy) return; busy = true; try { await api('/api/actions',body); await refresh(); } catch(error) { toast(error.message); } finally { busy = false; } }
+  function switchTab(name) { activeTab = name; document.querySelectorAll('.page').forEach(node => node.hidden = node.id !== name); document.querySelectorAll('.tab').forEach(node => node.classList.toggle('active',node.dataset.tab === name)); }
+  function sessionButton(source,id,label,item) { return '<button class="small" data-session="'+escapeHtml(id)+'" data-source="'+escapeHtml(source)+'"'+(item?' data-item="'+escapeHtml(item)+'"':'')+'>'+escapeHtml(label || short(id))+'</button>'; }
+  function spark(history) { const values = (history || []).slice(-35).map(item => Number(item.error_rate || 0)); if (values.length < 2) return ''; const points = values.map((value,i) => (i * 82/(values.length-1)).toFixed(1)+','+(28-value*26).toFixed(1)).join(' '); return '<svg class="spark" viewBox="0 0 85 32" aria-label="错误率走势"><line x1="0" y1="29" x2="85" y2="29" stroke="#dce3dc"/><polyline points="'+points+'" fill="none" stroke="'+(values.some(v=>v>0)?'#b46a36':'#167b65')+'" stroke-width="1.7"/></svg>'; }
+  function verified(number) { return (state.checks || []).some(check => check.stage >= number && check.verified); }
+  function renderControl() {
+    const agent = state.agent;
+    $('model').textContent = agent.mode === 'live' ? '真实模型' : '本地脚本模型';
+    $('agent-title').textContent = agent.status === 'offline' ? 'Agent 等待接入' : '巡检 Agent';
+    $('agent-status').outerHTML = '<span id="agent-status">'+badge(agent.status)+'</span>';
+    $('agent-note').textContent = agent.code_changed && agent.running_sha256 ? '代码已更新，点击“应用代码”在新运行中接入。' : (agent.active_stage ? '当前接入第 '+agent.active_stage+' 阶段 · 服务环境独立运行' : '服务现场已准备好，先让巡检 Agent 上线。');
+    if (agent.implementation_error) $('agent-note').textContent='代码暂时无法加载 · '+agent.implementation_error;
+    $('code-path').textContent = agent.implementation+'  ·  '+short(agent.code_sha256);
+    $('workspace').textContent = state.root;
+    $('start').disabled = ['running','starting'].includes(agent.status);
+    $('stop').disabled = !['running','starting'].includes(agent.status);
+    $('stages').innerHTML = agent.stages.map(item => '<button class="stage '+(item.number===stage?'active':'')+'" data-stage="'+item.number+'"><div class="stage-num">PART '+String(item.number).padStart(2,'0')+'</div><div class="stage-name">'+escapeHtml(item.title)+'</div>'+badge(verified(item.number)?'passed':item.implemented?'unchecked':'unimplemented')+'</button>').join('');
+    $('guide-text').textContent = observations[stage-1];
+    $('check').disabled = (state.checks || []).some(check => check.status==='running');
+    const checks = (state.checks || []).filter(check => check.stage === stage).slice(-3).reverse();
+    $('checks').innerHTML = checks.length ? checks.map(check => '<div class="row">'+badge(check.status)+'<span class="tiny muted">'+time(check.finished_at || check.started_at)+' · '+short(check.implementation_sha256)+'</span></div><pre>'+escapeHtml(check.log || (check.evidence ? pretty(check.evidence) : '正在执行实际检查…'))+'</pre>').join('') : '<p class="muted">完成本关后运行检查，结果和会话会留在工作台。</p>';
+  }
+  function renderOverview() {
+    const services = state.instances.flatMap(instance => instance.services);
+    const values = [['服务',services.length],['最近检查',services.filter(service=>service.checkpoint).length],['待处理事故',state.incidents.filter(item=>!item.source.startsWith('check:')&&item.status!=='recovered').length],['当前阶段',state.agent.active_stage || '—']];
+    $('stats').innerHTML = values.map(([label,value])=>'<div class="stat"><span class="muted tiny">'+label+'</span><strong>'+value+'</strong></div>').join('');
+    $('instances').innerHTML = state.instances.map(instance => '<article class="card"><div class="section-head"><h3>'+escapeHtml(instance.id==='instance-a'?'Hermes A':'Hermes B')+'</h3><span class="tiny muted">独立服务环境</span></div>'+instance.services.map(service => {
+      const metrics=service.metrics || {}, point=service.checkpoint;
+      return '<div class="service"><div class="service-title"><span class="service-name">'+escapeHtml(service.name)+'</span>'+badge(service.health)+'</div><div class="metrics"><div><div class="metric-label">30s 请求数</div><div class="metric-value">'+escapeHtml(metrics.requests ?? '—')+'</div></div><div><div class="metric-label">5xx 比例</div><div class="metric-value">'+(metrics.error_rate==null?'—':(metrics.error_rate*100).toFixed(1)+'%')+'</div></div><div><div class="metric-label">P95</div><div class="metric-value">'+(metrics.p95_ms==null?'—':Number(metrics.p95_ms).toFixed(0)+' ms')+'</div></div>'+spark(service.history)+'</div><div class="tiny muted">'+(point?'Agent 检查 '+time(point.checked_at)+' · '+escapeHtml(point.status==='healthy'?'健康':labels[point.status] || point.status):'尚未收到 Agent 巡检记录')+'</div><div class="fault-actions"><button data-fault="on" data-instance="'+instance.id+'" data-service="'+service.name+'">注入持续失败</button><button data-fault="intermittent" data-instance="'+instance.id+'" data-service="'+service.name+'">注入间歇失败</button><button data-fault="off" data-instance="'+instance.id+'" data-service="'+service.name+'">解除故障</button>'+(service.fault!=null?'<span class="tiny" style="color:var(--amber)">故障已注入</span>':'')+'</div></div>';
+    }).join('')+'</article>').join('');
+    $('events').innerHTML = state.events.slice(0,9).map(event=>'<div class="event"><time>'+time(event.time)+'</time><span>'+escapeHtml(event.message)+'</span></div>').join('') || '<div class="empty">等待第一个事件。</div>';
+  }
+  function incidentKey(item) { return item.source+'|'+item.incident_id; }
+  function renderIncidents() {
+    const rows=incidentRows();
+    $('incident-count').textContent = state.incidents.filter(item=>!item.source.startsWith('check:')).length || '';
+    $('live-incidents').classList.toggle('primary',incidentScope==='live'); $('check-incidents').classList.toggle('primary',incidentScope==='checks');
+    if (!rows.some(item=>incidentKey(item)===selectedIncident)) { selectedIncident=rows.length?incidentKey(rows[0]):null; detailVersion=null; }
+    $('incident-list').innerHTML = rows.length ? rows.map(item=>'<button class="incident '+(selectedIncident===incidentKey(item)?'selected':'')+'" data-incident="'+escapeHtml(incidentKey(item))+'"><div class="row"><strong>'+escapeHtml(item.service)+'</strong>'+badge(item.status)+'</div><div class="tiny muted">'+escapeHtml(item.instance)+' · '+time(item.observed_at)+'</div><div class="tiny muted">'+escapeHtml(item.incident_id)+'</div></button>').join('') : '<div class="empty">从服务现场注入一次故障。Agent 上线后会接手监控告警。</div>';
+    const item=state.incidents.find(row=>incidentKey(row)===selectedIncident);
+    $('question-box').hidden = !item || incidentScope==='checks';
+    $('sessions').innerHTML=state.sessions.slice(0,12).map(session=>'<div class="event"><span class="tiny muted">'+time(session.started_at)+'</span>'+sessionButton(session.source,session.id,short(session.id))+'<span class="tiny muted">'+(session.parent_session_id?'分支':'主会话')+' · '+session.message_count+' 条记录</span></div>').join('') || '<p class="muted">Agent 上线或运行检查后，这里会出现真实会话。</p>';
+    if (!item) { $('incident-detail').innerHTML='<p class="muted">'+(incidentScope==='checks'?'运行检查后，可在这里打开检查样本的会话。':'在服务现场注入故障，查看 Agent 怎样接手与交接。')+'</p>'; return; }
+    const version=JSON.stringify(item);
+    if (version!==detailVersion) {
+      detailVersion=version;
+      const branch=item.investigation, report=branch?.report || item.report || {};
+      const probes=branch?.probes || [], states=[['告警与初判',true],['分支补查',!!branch],['Page 工程师',!!item.page],['恢复验证',item.status==='recovered']];
+      $('incident-detail').classList.remove('empty');
+      $('incident-detail').innerHTML='<div class="row"><h3>'+escapeHtml(item.service)+' · '+escapeHtml(item.instance)+'</h3>'+badge(item.status)+'</div><div class="tiny muted">'+escapeHtml(item.incident_id)+'</div><div class="timeline">'+states.map(([label,done])=>'<span class="'+(done?'done':'')+'">'+label+'</span>').join('')+'</div><h3>当前判断</h3><div class="report">'+escapeHtml(report.analysis || report.summary || '正在收集现场证据…')+'</div><div class="probes">'+probes.map((probe,i)=>(i?'<span class="muted">→</span>':'')+'<span class="probe">'+escapeHtml(probe.http_status)+'</span>').join('')+'</div>'+(report.recovery_plan?'<p class="tiny muted">恢复建议 · '+escapeHtml(report.recovery_plan.action==='clear_lab_fault'?'确认后解除本次实验故障，并检查两个独立健康窗口':report.recovery_plan.action)+'</p>':'')+'<div class="buttons">'+sessionButton(item.source,item.session_id,'查看初判会话',item.report_item_id)+(branch?sessionButton(item.source,branch.session_id,'查看分支调查',branch.report_item_id):'')+'</div><p class="tiny muted">Skill '+escapeHtml(short(item.skill_sha256))+' · 报告 Item '+escapeHtml(item.report_item_id)+'</p>';
+    }
+    const questions=(state.questions || []).filter(question=>question.incident_id===item.incident_id);
+    $('answers').innerHTML=questions.map(question=>'<div class="message"><div class="tiny muted">'+escapeHtml(question.question || '')+' · '+escapeHtml(labels[question.status]||question.status)+'</div><p class="report">'+escapeHtml(question.answer || question.error || (question.status==='failed'?question.output:'Agent 正在核对证据…'))+'</p>'+(question.session_id?sessionButton(item.source,question.session_id,'查看这次追问',question.report_item_id):'')+'</div>').join('');
+  }
+  function renderMemory() {
+    const memory=state.memory || {}, facts=memory.facts || [], recalls=memory.recalls || [];
+    $('review-memory').disabled = !(state.agent.stages[2]?.implemented) || !state.incidents.some(item=>item.status==='recovered');
+    let body = memory.status ? '<p>'+badge(memory.status)+'</p>' : '';
+    if (!facts.length) body+='<div class="card empty">完成一次故障调查并确认恢复后，点击“复盘已恢复事故”。Memory 会保留事实及原始会话来源。</div>';
+    body+=facts.map(entry=>{const fact=entry.fact || entry.evidence || entry;return '<div class="card memory-card"><div class="row"><h3>'+escapeHtml(fact.service || '事故事实')+'</h3><button class="small" data-recall="'+escapeHtml(fact.incident_id)+'">新会话召回</button></div><p>历史探测 · '+escapeHtml((fact.probe_statuses || []).join(' → '))+'</p><p class="tiny muted">'+escapeHtml(fact.incident_id)+' · 恢复时间 '+time(fact.recovery_end)+'</p><p class="tiny muted">来源 '+escapeHtml(short(fact.source_session_id))+' / Item '+escapeHtml(fact.source_report_item_id)+'</p><div class="buttons">'+sessionButton((fact.source_run || '').split('/').pop()+'/'+fact.instance,fact.source_session_id,'查看原始事故',fact.source_report_item_id)+'</div></div>';}).join('');
+    body+=recalls.map(entry=>{const result=entry.result || entry;return '<div class="card memory-card"><h3>新会话核对</h3><p>'+badge(result.status)+' '+sessionButton(entry.source || 'memory:'+entry.id,result.session_id,'查看召回会话',result.report_item_id)+'</p><p class="tiny muted">实际读取历史后，再查询当前 HTTP · '+escapeHtml(labels[result.report?.current_status] || result.report?.current_status || '')+'</p><details><summary>查看记忆与现场证据</summary><pre>'+escapeHtml(pretty(result))+'</pre></details></div>';}).join('');
+    if (memory.job) body+='<p>'+badge(memory.job.status)+'</p>'+(memory.job.status==='failed'?'<pre>'+escapeHtml(memory.job.output)+'</pre>':'');
+    if (memory.last_error) body+='<pre>'+escapeHtml(pretty(memory.last_error))+'</pre>';
+    $('memory-content').innerHTML=body;
+  }
+  function renderLearning() {
+    const learning=state.learning || {};
+    $('learning-status').innerHTML=badge(learning.status || 'offline');
+    const release=learning.last_release;
+    let body='<div class="card"><div class="row"><div><div class="metric-label">当前正式版</div><strong>'+escapeHtml(short(learning.active_sha256))+'</strong></div>'+(release?badge(release.status):'')+'</div>';
+    if (release) body+='<p class="tiny muted">上一版 '+escapeHtml(short(release.previous_sha256))+'</p><div class="timeline">'+Object.entries(release.adoptions || {}).map(([alias,proof])=>'<span class="'+(proof.passed?'done':'')+'">'+escapeHtml(alias)+' · '+escapeHtml((proof.probe_http_statuses || []).join(' → '))+'</span>').join('')+'</div>';
+    body+='</div>';
+    if (!(learning.batches || []).length) body+='<div class="empty">后台等待两端已恢复、已归档且使用同一版本的事故经历。只有一端完成时，在线巡检继续。</div>';
+    body+=(learning.batches || []).map(batch=>'<div class="card memory-card"><div class="row"><h3>独立评测与发布决定</h3>'+badge(batch.status)+'</div>'+((batch.evaluation?.cases || []).length?'<table class="evaluation"><thead><tr><th>现场</th><th>现行版</th><th>候选版</th></tr></thead><tbody>'+batch.evaluation.cases.map(row=>'<tr><td>'+escapeHtml(({intermittent:'间歇失败',persistent:'持续失败','not-reproduced':'未复现'})[row.case] || row.case)+'</td><td>'+badge(row.baseline.passed?'passed':'failed')+'</td><td>'+badge(row.candidate.passed?'passed':'failed')+'</td></tr>').join('')+'</tbody></table>':'<p class="muted">'+escapeHtml(batch.error || '这批经历保留现行方法。')+'</p>')+'<details><summary>来源与评测证据</summary><pre>'+escapeHtml(pretty(batch))+'</pre></details></div>').join('');
+    if (learning.diff) body+='<div class="card memory-card"><details><summary>查看获准 Skill 的改动</summary><pre>'+escapeHtml(learning.diff)+'</pre></details></div>';
+    $('learning-content').innerHTML=body;
+  }
+  async function refresh() { try { state=await api('/api/state'); $('connection').textContent='现场更新 '+time(state.time); renderControl(); renderOverview(); renderIncidents(); renderMemory(); renderLearning(); } catch(error) { $('connection').textContent='连接中断'; toast(error.message); } }
+  async function openSession(source,id,item) { try { const result=await api('/api/session?source='+encodeURIComponent(source)+'&session='+encodeURIComponent(id)+(item?'&item='+encodeURIComponent(item):'')); switchTab('incidents'); $('session-panel').hidden=false; $('session-title').textContent='执行轨迹 · '+short(result.session.id); $('messages').innerHTML=result.messages.map(message=>'<div class="message"><div class="message-label">'+escapeHtml(message.role)+' · Item '+message.id+(message.tool_name?' · '+escapeHtml(message.tool_name):'')+'</div>'+(message.tool_calls.length?'<pre>'+escapeHtml(pretty(message.tool_calls))+'</pre>':'')+'<pre>'+escapeHtml(message.content || '')+'</pre></div>').join(''); $('session-panel').scrollIntoView({behavior:'smooth',block:'start'}); } catch(error) { toast(error.message); } }
+  document.addEventListener('click', async event => {
+    const button=event.target.closest('button'); if (!button) return;
+    if (button.dataset.stage) { stage=Number(button.dataset.stage); renderControl(); }
+    if (button.dataset.tab) switchTab(button.dataset.tab);
+    if (button.dataset.action) await action({action:button.dataset.action});
+    if (button.dataset.fault) await action({action:'fault',instance:button.dataset.instance,service:button.dataset.service,mode:button.dataset.fault});
+    if (button.dataset.incident) { selectedIncident=button.dataset.incident; detailVersion=null; renderIncidents(); }
+    if (button.dataset.session) await openSession(button.dataset.source,button.dataset.session,button.dataset.item);
+    if (button.dataset.recall) await action({action:'memory_recall',incident_id:button.dataset.recall});
+  });
+  $('live-incidents').onclick=()=>{incidentScope='live';renderIncidents();};
+  $('check-incidents').onclick=()=>{incidentScope='checks';renderIncidents();};
+  $('check').onclick=()=>{ $('check-details').open=true; return action({action:'check',stage}); };
+  $('review-memory').onclick=()=>action({action:'memory_review'});
+  $('close-session').onclick=()=>$('session-panel').hidden=true;
+  $('ask').onclick=()=>{const item=state?.incidents.find(row=>incidentKey(row)===selectedIncident);const question=$('question').value.trim();if(item&&question)action({action:'question',source:item.source,incident_id:item.incident_id,question});};
+  $('copy-prompt').onclick=async()=>{const quote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";const text=prompts[stage-1]+' 每次只完成这一关，在 '+state.agent.implementation+' 中实现。完成后运行 .deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage '+stage+' --implementation '+quote(state.agent.implementation)+' --workbench '+quote(state.root)+(state.agent.mode==='live'?' --live':'')+'，修到通过，再告诉我回工作台看哪里。';try{await navigator.clipboard.writeText(text);toast('本关提示词已复制');}catch(error){toast('复制失败，请从仓库引导文件读取本关提示词');}};
+  refresh(); setInterval(refresh,1800);
+</script>
+</body>
+</html>

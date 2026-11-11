@@ -41,7 +41,7 @@ def run(project):
                        and row['observation'] == 'database_connections_exhausted' for row in rows)
             or not any(row['kind'] == 'trace' and row['upstream'] == upstream for row in rows)):
         save(project.root / 'incident-lifecycle.json', online.report())
-        raise RuntimeError('现场回执不足以提交演练处置，保留调查状态供值班员接手')
+        raise RuntimeError('现场回执不足以提交演练处置，保留调查状态供值班工程师接手')
     online.request_action(incident, operation, proof['artifact'] + '/proof.json')
     early_denied = rejected(lambda: online.execute(incident, operation, scope))
     wrong_scope_denied = rejected(lambda: online.approve(incident, operation, 'different-scope', 'lab-duty-a'))

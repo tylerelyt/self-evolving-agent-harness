@@ -1,10 +1,34 @@
-# 综合实战参考实现｜双实例 On-call 与 Skill 改进
+# 综合实战｜在工作台逐步搭起 On-call Agent
 
-这个项目让多个 Hermes Agent 同时巡检各自负责的范围。它们将各自的调查会话交给同一个 SkillClaw 共享组，汇集证据形成 Skill 候选。通过对照评测的版本再同步给巡检实例，由下一轮任务验证是否真正用上。
+先把服务环境打开，再让 Agent 一步步上线。工作台起初只有两套业务环境，Agent 显示为离线。你在 Coding Agent 中逐关补全同一个 `lab/self_improvement_agent.py`，检查通过后回到网页应用代码，观察巡检、告警调查、Memory 和 Skill 学习怎样逐项接上。
 
-主入口是 [self_improvement_agent.py](self_improvement_agent.py)，提供已经接好的巡检、告警调查、工程师交接、会话归档、独立评测和 Skill 发布流程。安装课程固定依赖后，可以直接运行参考实现。
+## 启动本地工作台
 
-默认使用本机脚本模型，无需 API key。添加 `--live` 后使用配置好的真实模型端点。两种模式都通过 Hermes 执行工具，访问本地 HTTP 服务。
+从仓库根目录运行。需要 Git、Bash，以及 Python 3.12 或 `uv`。安装脚本会准备课程固定版本的 Hermes 和 SkillClaw。默认由本机脚本模型驱动，HTTP 服务、Hermes 工具调用和会话记录实际运行。
+
+```bash
+bash scripts/setup_deps.sh
+bash scripts/setup_skillclaw.sh
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/app.py \
+  --state workshop/capstone/runtime/workbench --port 8765
+```
+
+打开终端给出的地址。先在「服务现场」确认两套环境已经有请求和指标，再查看 Agent 的离线状态。保持工作台运行，在仓库根目录打开 Codex、Claude Code 或其他 Coding Agent，按[逐关指南](lab/README.md)一次发送一关请求。
+
+每关检查通过后，回到工作台点击「启动 Agent」或「应用代码」，再按指南在面板里观察。当前实现始终保存在 `lab/self_improvement_agent.py`，每次修改都在这份文件上继续。检查会记录实际使用的实现路径、内容指纹和证据位置，并通过请求中的 `--workbench` 将结果带回同一工作台。
+
+| 阶段 | 你补的能力 | 回工作台看什么 |
+| --- | --- | --- |
+| 1 · 巡检上线 | `patrol_config` | 「服务现场」里的 Agent 上线和巡检检查点 |
+| 2 · 调查与交接 | 告警投递、会话分支、paging | 「事故与调查」里的工具证据、分支报告和人工交接 |
+| 3 · 跨会话 Memory | `recall_memory` | 「Memory」里的来源事实、新会话召回和当前现场核对 |
+| 4 · Skill 学习 | `release_policy` | 「Skill 学习」里的候选、成对评测、发布及采用状态 |
+
+工作台中的「运行本关检查」使用同一套检查器。Codex 会读取练习目录的 [AGENTS.md](lab/AGENTS.md)；使用其他 Coding Agent 时，也先让它读取并遵守这份规则。每完成一关，保留检查结果，再回面板亲自触发场景。
+
+## 完整参考运行
+
+需要直接复查完整系统时，可以运行 [self_improvement_agent.py](self_improvement_agent.py)。它提供已经接好的巡检、告警调查、工程师交接、会话归档、独立评测和 Skill 发布流程。下面保留命令行参考入口和扩展模块说明。
 
 | 你想观察什么 | 从哪里开始 | 运行到哪里 |
 | --- | --- | --- |

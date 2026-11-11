@@ -108,6 +108,6 @@ def respond(messages):
         )
         report["summary"] += (
             f"当前探测依次返回 {probes}。影响范围与根因仍需核实。"
-            "请值班人检查实验故障开关，处置后等待新一轮指标确认恢复。"
+            "请值班工程师检查实验故障开关，处置后等待新一轮指标确认恢复。"
         )
     return None, report

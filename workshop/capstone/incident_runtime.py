@@ -1,4 +1,4 @@
-"""结课演练的在线事件与处置状态机。存储和状态转换真实，业务观测与处置使用本机夹具。"""
+"""本地事故与处置状态机。存储和状态转换真实，业务观测与处置使用本机夹具。"""
 from contextlib import closing
 import json
 import sqlite3
@@ -96,7 +96,7 @@ class IncidentRuntime:
 
     def approve(self, incident, operation, scope, actor):
         if not actor:
-            raise ValueError('审批必须记录演练值班员身份')
+            raise ValueError('审批必须记录演练值班工程师身份')
 
         def record(db):
             approved = db.execute('''UPDATE operations SET approved_by=?

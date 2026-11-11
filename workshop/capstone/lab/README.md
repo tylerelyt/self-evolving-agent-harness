@@ -1,86 +1,62 @@
-# 实作｜让巡检 Agent 接手一次告警
+# 逐关实现自己的 On-call Agent
 
-支付服务已经在接收请求，Hermes 也能跑完一轮健康巡检。接下来由你把监控发出的告警接进当前会话，从初判报告继续调查，再把结果交给值班员。最后给学到的新方法加一道发布门槛。
+工作台已经准备了两套正在接收请求的业务环境，Agent 起初显示离线。接下来由你借助 Coding Agent，把巡检、故障调查、跨会话 Memory 和 Skill 学习逐项接进来。四关都修改当前目录的 [self_improvement_agent.py](self_improvement_agent.py)。
 
-四关都在 `self_improvement_agent.py` 里完成。仓库已经提供 HTTP 服务、监控替身、巡检 Skill、Hermes SessionDB 和业务评分器。 [起始代码](self_improvement_agent.py)
+先按[工作台启动说明](../README.md#启动本地工作台)打开网页，再从仓库根目录打开 Codex、Claude Code 或其他 Coding Agent。让它先读取本目录的 [AGENTS.md](AGENTS.md)。下面每个请求只完成一关，Coding Agent 会自动运行检查，根据失败信息修改，直到本关通过。然后你回工作台应用代码，亲自观察现场发生的变化。
 
-## 先确认巡检能跑
+## 第 1 关，让 Agent 开始巡检
 
-从仓库根目录运行。默认用本地脚本模型，无需模型密钥。
+网页上已经有业务请求，但还没有 Agent 检查这些服务。你需要补全 `patrol_config`，让运行时获得服务范围、每轮抽查数量和巡检间隔。当前环境里的订单、支付、库存和通知四个服务都可以被巡检。运行时按这些配置持续调度，Hermes 则通过巡检 Skill 读取指标、查询历史并保存检查点。
 
-```bash
-bash scripts/setup_deps.sh
-PY=.deps/hermes-agent/.venv/bin/python
-LAB=workshop/capstone/lab
-"$PY" -B "$LAB/check.py" --part 0
-```
+把这一段交给 Coding Agent。
 
-看到 `PASS 0` 后，打开打印出的运行目录。`healthy.json` 里有这次巡检的 `session_id`、工具回执 Item 和报告 Item。先跑 `--part 1`，看看当前巡检在收到监控告警之后缺了哪一步。
+> 先读取 workshop/capstone/lab/AGENTS.md 和 README.md，只完成第 1 关。实现 workshop/capstone/lab/self_improvement_agent.py 中的 patrol_config，让两个实例能够按配置抽查服务并持续巡检。运行 `.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 1 --workbench workshop/capstone/runtime/workbench`，按失败信息修正直到通过。结束时用三个短点告诉我修改、检查结果及证据、回工作台应该看哪里。
 
-| 关卡 | 你要补的函数 | 跑通后看什么 |
-| --- | --- | --- |
-| 1 · 投递告警 | `route_alert` | `triage.json` 中，同一 Session 收到原始监控事件，读取 On-call Skill，随后得到 HTTP 探测回执 |
-| 2 · 从报告继续查 | `branch_report` | `investigation.json` 中，子 Session 指向初判报告 Item，并保留三次新探测 |
-| 3 · 把结果交给人 | `notify_operator` | `page.json` 引用真实分支报告，`continued.json` 显示原巡检 Session 又写了一条检查点 |
-| 4 · 给新 Skill 放行 | `release_policy` | `evaluation/evaluation.json` 有三题的新旧对照。候选合格，缺证据、回归和无增益的反例被拒绝 |
+检查通过后回到工作台，点击「启动 Agent」。在「服务现场」观察 Agent 从离线变为运行，服务逐步出现巡检检查点。对照当前指标和最近一次检查的时间，再找这次检查对应的 Session 和报告 Item。保持页面运行一会儿，确认新的检查点还在产生。
 
-### 1. 把告警交给正在运行的回合
+本关只启动巡检。接着把告警送进运行中的任务。
 
-`route_alert` 收到已核对范围的原始监控事件和当前回合的 `steer` 回调。第一行以 `ONCALL_ALERT ` 开头，后面跟完整的告警 JSON。下一行让 Hermes 通过 `skill_view` 读取 `oncall-alert-triage`。把 `steer` 的返回值交还给宿主，由宿主确认回合是否接收。
+## 第 2 关，接手告警并交给值班工程师
 
-```bash
-"$PY" -B "$LAB/check.py" --part 1
-```
+巡检已经在跑，现在给其中一个环境注入故障。监控应该发出告警，Agent 在当前回合读取 On-call Skill 并初判，从报告 Item fork 补查，把结论和恢复建议 page 给值班工程师。交接之后，原巡检应继续运行。
 
-### 2. 从那条初判报告分支
+这一关补三个函数。`route_alert` 把原始告警交给当前回合的 `steer`。`branch_report` 从保存的报告 Item 创建子 Session。`notify_operator` 保存引用真实分支报告的 paging 记录。参数和返回值以起始代码的函数约定为准，消息、查询和 SessionDB 接口由上层运行时提供。
 
-`record` 里有初判 `session_id` 和 `report_item_id`。用 `checkpoint_rows` 取到该 Item 为止的消息，创建一个带父 Session ID 的新 Session，再复制这段前缀。返回新 Session ID，以及原 Item ID 到复制后消息的映射。`checkpoint_rows` 和 SessionDB 的现有用法可以从 [运行时接口](../patrol/hermes_runtime.py) 查到。
+> 按 workshop/capstone/lab/AGENTS.md，只完成第 2 关。在同一个 workshop/capstone/lab/self_improvement_agent.py 里实现 route_alert、branch_report 和 notify_operator，接起原始告警、同回合初判、报告分支和工程师交接。运行 `.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 2 --workbench workshop/capstone/runtime/workbench`，根据真实会话与工具证据修正直到通过。结束时用三个短点报告修改、检查结果及证据、回工作台的操作与观察位置。
 
-```bash
-"$PY" -B "$LAB/check.py" --part 2
-```
+检查通过后点击「应用代码」，让工作台加载当前实现。先等健康巡检，再在「服务现场」给一个目标服务注入故障。在「事故与调查」里打开这起事故，沿告警、初判工具结果、分支报告和 paging 记录往下看。通知之后再观察巡检时间是否继续更新。
 
-### 3. 交接后继续巡检
+读过恢复建议后，在「服务现场」清除对应故障。等待两个互不重叠的健康窗口，再看这起事故的恢复记录。两个环境可以分别制造故障和恢复，先在一个环境中走通。
 
-把 `notify_operator` 收到的调查结果写到给定 `path`。收件箱回执包含 `incident_id`、`session_id`、`report_item_id` 和 `report`。另外写上调用方给你的 `scope`、`recipient`、`evidence`，以及 `channel` 为 `local_oncall_inbox`、`paged_at` 为当前时间。可以用 `environment.write_json` 原子写入。复跑验收会检查同一事故是否只留下一个通知，以及原巡检会话是否又写入一条检查点。
+## 第 3 关，在新会话里用上历史事实
 
-```bash
-"$PY" -B "$LAB/check.py" --part 3
-```
+故障恢复以后，下一次任务需要知道前面发生过什么，也要重新确认眼前的状态。这一关实现 `recall_memory`，让一个新的 Hermes 会话检索有来源的事故事实，再查询当前 HTTP 指标。历史事实应保留服务、环境、时间和源会话，当前判断由本次工具结果支持。
 
-前三关通过后，可以用自己的代码持续值守。三个终端都从仓库根目录运行。终端 A 先建一轮独立状态目录，把打印出的路径复制到 B、C。
+> 按 workshop/capstone/lab/AGENTS.md，只完成第 3 关。在同一个 workshop/capstone/lab/self_improvement_agent.py 里实现 recall_memory，按照提供的接口，让新会话读取带来源的历史事实，并查询当前服务状态。运行 `.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 3 --workbench workshop/capstone/runtime/workbench`，检查包含故障恢复窗口，保持运行直到完成，失败时根据证据修正后重跑。结束时用三个短点报告修改、检查结果及证据、回工作台的观察位置。
 
-```bash
-# 终端 A
-STATE=$(mktemp -d)
-echo "$STATE"
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/patrol/environment.py --state "$STATE" serve
-```
+检查通过后回工作台点击「应用代码」，处理并恢复一次故障。到「Memory」点击「复盘已恢复事故」，查看生成的历史事实与来源；随后点击「新会话召回」，对照新会话的检索结果和新取得的服务指标。确认历史记录来自哪起事故、哪个 Session，以及本次判断查了什么当前数据。本关检查会实际等待恢复窗口，通常比前两关耗时更长。
+
+## 第 4 关，让评测决定新 Skill 能否发布
+
+两端的事故经历可以进入 SkillClaw，生成共享 Skill 候选。你补全 `release_policy`，用新旧版本在同一批冻结题上的结果决定是否放行。两版都要有可核对的执行证据，候选通过全部用例，并至少修好一道现行版没做对的题。缺证据、出现回归、内容没有变化或没有增益时，都应保留现行版。
+
+> 按 workshop/capstone/lab/AGENTS.md，只完成第 4 关。在同一个 workshop/capstone/lab/self_improvement_agent.py 里实现 release_policy，用成对评测的工具轨迹与业务结果判断候选能否放行。运行 `.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 4 --workbench workshop/capstone/runtime/workbench`，检查有效候选及缺证据、回归、无增益等反例，修正直到通过。结束时用三个短点报告修改、检查结果及证据、回工作台接下来怎样观察学习和采用。
+
+检查通过后「应用代码」。在两个环境分别处理并恢复事故，随后到「Skill 学习」观察会话组批、候选生成、独立评测和版本决定。发布后，再用新的故障任务检查实际加载的 Skill 哈希和新增探测。只有两个实例的新任务都留下对应证据，才算验证了两端采用。
+
+如果还没有形成学习批次，先看两端是否都有已恢复的事故。若候选被拒绝或保留，按逐题结果查原因。已经发布但还没有后续事故时，保留待采用验证的状态。
+
+## 每关完成后怎么核对
+
+Coding Agent 的检查会生成 `check.json`，记录本次实际读取的实现路径、内容指纹和证据位置。请求中的 `--workbench` 指向当前工作台，检查结果和 Session 证据会回到该工作台。检查通过后点击「应用代码」，再到对应分区观察运行结果。工作台里的「运行本关检查」可以用同一检查器再次核对当前代码。
+
+可以单独重跑任一关，默认使用当前目录的学员实现。
 
 ```bash
-# 终端 B
-STATE=刚才打印的路径
-.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/run.py --state "$STATE"
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 2 \
+  --workbench workshop/capstone/runtime/workbench
 ```
 
-```bash
-# 终端 C，等终端 B 出现 healthy 再运行
-STATE=刚才打印的路径
-PY=.deps/hermes-agent/.venv/bin/python
-ENV=workshop/capstone/patrol/environment.py
-"$PY" -B "$ENV" --state "$STATE" fault payments on
-```
+如果启动时使用了其他 `--state` 目录，把上述请求和命令中的 `--workbench` 一并改成面板显示的工作台路径。独立运行检查时，也可以用 `--implementation` 指定实现文件、用 `--out` 指定新输出目录。检查和工作台默认使用本机脚本模型，无需模型密钥。配置真实模型后可显式传入 `--live`。工作台里的旧运行记录保留用于对照，当前服务现场以正在运行的实例为准。
 
-等终端 B 打印值班通知，打开 `$STATE/pages/<事故 ID>/page.json` 核对它引用的报告。再用同一条故障命令把 `on` 改成 `off`。观察巡检继续运行，后续两个独立健康窗口提交后可以用 `patrol.py --state "$STATE" status` 查看恢复检查点。结束时先在 B 停巡检，再在 A 停业务环境。
-
-### 4. 让独立评测决定是否采用候选
-
-这关提供一份教学候选。它要求第一次探测为 5xx 时再查一次，用来区分持续失败和间歇失败。评测端让两版 Skill 分别在新 Hermes 会话中查询同一批冻结快照，传给你的 `results` 是逐题的 `baseline` 和 `candidate` 判分。检查两版的 `valid_trace`、候选的 `passed`、是否有至少一道从失败变为通过，以及两份 Skill 的指纹是否不同。只在这几项都成立时返回 `True`。
-
-```bash
-"$PY" -B "$LAB/check.py" --part 4
-```
-
-这一关把验收决定留在本轮目录。想继续观察事故会话进入 SkillClaw、生成候选、正式发布和两端采用，可接着跑[双实例完整演练](../README.md#运行双实例演练)。
-
-需要核对接口时，可以加 `--solution` 跑参考实现。每次验收会创建新目录，并在结束时停止本轮业务环境。 [参考实现](solutions/self_improvement_agent.py)
+完整系统的命令行参考入口、数据集、离线优化和发布恢复说明见[综合实战配套工程](../README.md#完整参考运行)。

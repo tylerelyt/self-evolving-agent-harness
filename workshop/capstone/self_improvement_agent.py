@@ -19,6 +19,16 @@ from patrol import steer_oncall as route_alert
 release_policy = release_allowed
 
 
+def patrol_config():
+    return {"services": ["orders", "payments", "inventory", "notifications"], "sample": 2, "interval": 1}
+
+
+def recall_memory(state, memory, environment_state, scope, options):
+    from fact_handoff import handoff
+
+    return handoff(state, memory, environment_state, scope, options)
+
+
 @dataclass
 class RoundTask:
     number: int

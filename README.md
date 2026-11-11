@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 看一次评分器校准和版本采用决定 | [支付查询短练习](workshop/practice/README.md) | Python 3.12，无需密钥 |
 | 按课学习 Agent 的执行过程 | [第 1 讲 Notebook](#从第-1-讲开始) | Python 3.12、Notebook 依赖。运行真实模型时需要 GLM 密钥 |
-| 实际运行两个巡检 Agent，看 Skill 如何发布与回退 | [第 23 讲大作业](workshop/capstone/README.md#运行双实例演练) | 固定版本的 Hermes 和 SkillClaw，默认模式无需密钥 |
+| 在工作台逐步接入巡检、调查、Memory 和 Skill 学习 | [On-call 综合实战](workshop/capstone/README.md#启动本地工作台) | 固定版本的 Hermes 和 SkillClaw，默认模式无需密钥 |
 
 在仓库根目录运行下面的命令，可先用构造订单对照两版方法的评分。终端会打印保留或采用的决定，以及本轮记录的目录。
 
@@ -103,7 +103,7 @@ bash examples/21-skillclaw-session-collection/run.sh \
 
 第 23 讲的双实例演练从持续巡检和检查点起步，注入模拟故障，再把真实 Hermes 工具回执和原生 SkillClaw 归档送进候选评测、发布与采用验证。默认使用脚本模型。可另跑 OpenViking 交班、跨服务根因评测、Langfuse 采集和 GEPA 离线对照。[第 23 讲大作业](workshop/capstone/README.md) · [OpenViking 交班](workshop/capstone/README.md#用-openviking-做跨实例交班) · [根因评测](workshop/capstone/README.md#把巡检事故做成根因评测题) · [Langfuse 采集](workshop/capstone/README.md#把巡检与分支记录接入-langfuse) · [GEPA 离线对照](workshop/capstone/README.md#用-gepa-做一轮离线对照)
 
-综合一讲把持续巡检、事故交接、Skill 放行和下一轮采用接起来。 [四关实作](workshop/capstone/lab/README.md)
+综合一讲提供本地 On-call 工作台。先运行两套业务环境，再由 Coding Agent 逐关补全同一份 `self_improvement_agent.py`，检查通过后回面板应用代码、注入故障、追问报告，并观察 Memory 与 Skill 的后续使用。[打开工作台](workshop/capstone/README.md#启动本地工作台) · [四关实作](workshop/capstone/lab/README.md)
 
 ## 运行离线检查
 
