@@ -38,6 +38,7 @@
 
 [让 On-call Agent 在生产环境中持续成长](workshop/capstone/README.md)是独立的综合实战，单独运行两套 HTTP 环境与两个持续巡检的 Hermes，串联告警、调查、批准恢复、Memory、独立评测、Skill 发布与下一轮采用。
 
+- [跟着截图走完整个 Workshop](workshop/capstone/WALKTHROUGH.md)
 - [运行完整两轮演练](workshop/capstone/README.md#运行双实例演练)
 - [打开完整参考工作台](workshop/capstone/README.md#启动本地工作台)
 - [逐步搭建综合系统](workshop/capstone/lab/README.md)
