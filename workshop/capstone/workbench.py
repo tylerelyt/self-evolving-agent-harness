@@ -627,6 +627,7 @@ class Workbench:
                 row = db.execute("SELECT state FROM incidents WHERE id=?", (incident_id,)).fetchone()
                 runtime_state = row[0] if row else None
         return {**request, "approval": optional_json(directory / "approval.json"), "execution": execution,
+                "verification": optional_json(directory / "verification.json") or optional_json(directory / "verification-progress.json", {"windows": []}),
                 "runtime_state": runtime_state,
                 "status": "recovered" if runtime_state == "CLOSED" else "verifying" if execution else "approved" if optional_json(directory / "approval.json") else "awaiting_approval"}
 
@@ -635,7 +636,7 @@ class Workbench:
         from incident_runtime import IncidentRuntime
 
         request = self.recovery_snapshot(record["incident_id"])
-        if not request or not request["execution"] or request["runtime_state"] == "CLOSED" or record["recovered_inspection_id"] is None:
+        if not request or not request["execution"] or request["runtime_state"] == "CLOSED":
             return
         original = json.loads(record["observation"])
         if (source != request["source"] or source.rsplit("/", 1)[-1] != request["instance"] or original["service"] != request["service"]
@@ -668,7 +669,10 @@ class Workbench:
                 lower = observed["window_end"]
                 if len(windows) == 2:
                     break
-        if len(windows) != 2:
+        progress = self.root / "recovery" / record["incident_id"] / "verification-progress.json"
+        if optional_json(progress) != {"windows": windows}:
+            write_json(progress, {"windows": windows})
+        if len(windows) != 2 or record["recovered_inspection_id"] is None:
             return
         runtime = IncidentRuntime(self.root / "recovery" / "incidents.sqlite3")
         for index, window in enumerate(windows, 1):
@@ -915,7 +919,8 @@ class Workbench:
         finally:
             if db is not None:
                 db.close()
-        return {"id": alias, "services": services}
+        return {"id": alias, "services": services,
+                "source": f"{self.active_run.name}/{alias}" if self.active_run is not None else None}
 
     def incident_snapshot(self, source, state):
         database = state / "patrol.sqlite"
