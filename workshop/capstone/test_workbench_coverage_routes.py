@@ -239,6 +239,27 @@ class CoverageRouteTests(WorkbenchTestCase):
                             for item in result["sessions"]))
         self.assertEqual(result["evolution"]["jobs"], [])
 
+    def test_incomplete_rollback_attempt_does_not_hide_the_successful_retry(self):
+        _, restored = self.evolution_records()
+        incomplete = restored.parent.parent / "attempt-0/instance-a/hermes/state.db"
+        for kind in ("empty", "non-session", "corrupt"):
+            with self.subTest(kind=kind):
+                incomplete.unlink()
+                if kind == "corrupt":
+                    incomplete.write_bytes(b"interrupted database write")
+                else:
+                    with sqlite3.connect(incomplete) as db:
+                        if kind == "non-session":
+                            db.execute("CREATE TABLE async_delegations(id TEXT)")
+                before = incomplete.read_bytes()
+                result = self.snapshot()
+                proof = result["evolution"]["rollback"]["requests"][0]["result"]["verifications"]["instance-a"]
+                expected = "evolution:" + restored.relative_to(self.workbench.root).as_posix()
+                self.assertEqual(proof["source"], expected)
+                self.assertEqual(result["errors"], [])
+                self.assertEqual(self.workbench.session(expected, proof["session_id"], 1)["anchor_item_id"], 1)
+                self.assertEqual(incomplete.read_bytes(), before)
+
     def test_evolution_sources_reject_external_database_symlinks(self):
         for layout in ("diagnostic", "rollback"):
             for linked in ("hermes", "state.db"):

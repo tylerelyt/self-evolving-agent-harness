@@ -77,7 +77,8 @@ class Workbench:
                 directory = self.root / "environments" / alias
                 directory.mkdir(parents=True, exist_ok=True)
                 if (directory / "environment.json").exists():
-                    raise RuntimeError(f"An environment already owns {directory}. Choose a fresh workbench directory.")
+                    raise RuntimeError(f"An environment already owns {directory}. "
+                                       "Use --new-state for a new exercise; existing evidence is preserved.")
                 self.environments[alias] = self.spawn(
                     [sys.executable, "-B", str(HERE / "patrol/environment.py"), "--state", str(directory), "serve"],
                     directory / "environment.log",
@@ -575,12 +576,18 @@ class Workbench:
         for request in rollback["requests"]:
             for alias, proof in (request.get("result") or {}).get("verifications", {}).items():
                 for database in (self.root / "rollbacks" / request["id"] / "verification").glob(f"*/{alias}/hermes/state.db"):
-                    if not database.resolve().is_relative_to(self.root):
+                    if not self.persisted_session_database(database):
                         continue
-                    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sessions:
-                        if sessions.execute("SELECT 1 FROM sessions WHERE id=?", (proof["session_id"],)).fetchone():
-                            proof["source"] = "evolution:" + database.parent.parent.relative_to(self.root).as_posix()
-                            break
+                    try:
+                        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sessions:
+                            found = sessions.execute("SELECT 1 FROM sessions WHERE id=?", (proof["session_id"],)).fetchone()
+                    except sqlite3.Error:
+                        # Interrupted attempts can leave an incomplete SessionDB.
+                        # Resolve this proof from a later successful attempt.
+                        continue
+                    if found:
+                        proof["source"] = "evolution:" + database.parent.parent.relative_to(self.root).as_posix()
+                        break
             for replay in (request.get("result") or {}).get("behavior_replay", {}).values():
                 for arm in ("restored", "adopted"):
                     proof = replay[arm]

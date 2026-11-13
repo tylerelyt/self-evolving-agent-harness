@@ -355,6 +355,55 @@ def replay_behavior(directory, run, request, *, live=False):
     return result
 
 
+def commit_completion(state_path, state, directory, result):
+    """Commit authority last, without changing the in-memory pending record first."""
+    committed = {**state, "operator_rollback": {
+        **state["operator_rollback"], "status": "verified",
+        "result": str(directory / "result.json"), "verified_at": result["completed_at"],
+    }}
+    write_json(state_path, committed)
+
+
+def resume_completion(root, run, directory, request, state, service):
+    """Recover a pinned completed attempt without repeating publication or tasks."""
+    operator = state["operator_rollback"]
+    completion = operator.get("completion")
+    if completion is None:
+        # Older interrupted runs have no trusted completion journal. An explicit
+        # retry still uses the normal approved publication/verification path.
+        return None
+    if (not isinstance(completion, dict)
+            or completion.get("request_id") != request["id"]
+            or not isinstance(completion.get("artifact"), str)
+            or not re.fullmatch(r"completions/[0-9a-f]{32}\.json", completion["artifact"])
+            or not isinstance(completion.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", completion["sha256"])):
+        raise ValueError("The rollback completion journal is invalid")
+    artifact = inside(directory, directory / completion["artifact"])
+    if sha256(artifact) != completion["sha256"]:
+        raise ValueError("The rollback completion evidence changed")
+    result = load_json(artifact)
+    expected = {key: request[key] for key in ("run", "from_sha256", "to_sha256")}
+    if (result.get("schema") != SCHEMA or result.get("request_id") != request["id"]
+            or result.get("status") != "verified"
+            or any(result.get(key) != value for key, value in expected.items())
+            or state.get("pending_release") or state["active_sha256"] != request["to_sha256"]
+            or state.get("last_release", {}).get("status") != "rolled_back"
+            or state["last_release"].get("rollback_request_id") != request["id"]):
+        raise ValueError("The completed rollback no longer matches the authoritative version")
+    known_version(run, request["to_sha256"])
+    for alias in ALIASES:
+        if service["environments"][alias] != request["environments"][alias]:
+            raise ValueError("The active environment changed after approval")
+        inside(root, request["environments"][alias])
+        receiver = inside(run, run / "receivers" / alias / ONCALL_SKILL / "SKILL.md")
+        if sha256(receiver) != request["to_sha256"]:
+            raise ValueError("The restored receiver changed before completion could be committed")
+    write_json(directory / "result.json", result)
+    commit_completion(run / "learning/state.json", state, directory, result)
+    return result
+
+
 def execute(workbench_root, identifier, live=False):
     root = Path(workbench_root).resolve()
     directory, request = read_request(root, identifier)
@@ -368,7 +417,6 @@ def execute(workbench_root, identifier, live=False):
         raise ValueError("Use the active On-call service's model mode for rollback verification")
     ensure_loopback_no_proxy()
     with writer_lock(run / "learning", "governance.sqlite", timeout=1):
-        before = patrol_checkpoints(run)
         state_path = run / "learning" / "state.json"
         state = load_json(state_path)
         prior = state.get("operator_rollback")
@@ -381,6 +429,11 @@ def execute(workbench_root, identifier, live=False):
                 result["behavior_replay_verified_at"] = time.time()
                 write_json(directory / "result.json", result)
             return result
+        if resuming:
+            completed = resume_completion(root, run, directory, request, state, service)
+            if completed is not None:
+                return completed
+        before = patrol_checkpoints(run)
         if not resuming:
             if approved_release(run, state) != (request["from_sha256"], request["to_sha256"]):
                 raise ValueError("The adopted Skill changed after approval")
@@ -422,13 +475,23 @@ def execute(workbench_root, identifier, live=False):
                       "verifications": proofs, "behavior_replay": behavior,
                       "patrol_before": before, "patrol_continued": continued,
                       "completed_at": time.time()}
-            write_json(directory / "result.json", result)
-            state["operator_rollback"].update(status="verified", result=str(directory / "result.json"),
-                                              verified_at=result["completed_at"])
+            # The immutable payload is recoverable even when interruption lands
+            # after the authority pins its hash but before result.json is exposed.
+            completion = inside(directory, directory / "completions" / (uuid4().hex + ".json"))
+            completion.parent.mkdir(exist_ok=True)
+            write_json(completion, result)
+            state["operator_rollback"]["completion"] = {
+                "request_id": identifier, "artifact": str(completion.relative_to(directory)),
+                "sha256": sha256(completion),
+            }
             write_json(state_path, state)
+            write_json(directory / "result.json", result)
+            commit_completion(state_path, state, directory, result)
             return result
         except Exception as exc:
-            write_json(directory / "result.json", {"schema": SCHEMA, "request_id": identifier,
+            error_path = directory / ("completion-error.json" if state["operator_rollback"].get("completion")
+                                      else "result.json")
+            write_json(error_path, {"schema": SCHEMA, "request_id": identifier,
                        "status": "awaiting_verification", **expected, "error": str(exc), "updated_at": time.time()})
             raise
 
@@ -440,8 +503,14 @@ def rollback_state(workbench_root):
         directory, request = read_request(root, path.parent.name)
         result_path, approval_path = directory / "result.json", directory / "approval.json"
         result = load_json(result_path) if result_path.is_file() else None
-        requests.append({**request, "status": result["status"] if result else
-                         "approved" if approval_path.is_file() else "awaiting_approval",
+        status = result["status"] if result else "approved" if approval_path.is_file() else "awaiting_approval"
+        authority_path = (inside(root, Path(request["run"]) / "learning/state.json")
+                          if isinstance(request.get("run"), str) else None)
+        authority = load_json(authority_path) if authority_path is not None and authority_path.is_file() else {}
+        operator = authority.get("operator_rollback", {})
+        if operator.get("request_id") == request["id"] and operator.get("status") == "awaiting_verification":
+            status = "awaiting_verification"
+        requests.append({**request, "status": status,
                          "approval": load_json(approval_path) if approval_path.is_file() else None,
                          "result": result})
     requests.sort(key=lambda request: (request["requested_at"], request["id"]))

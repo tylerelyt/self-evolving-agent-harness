@@ -1,6 +1,7 @@
 """Require explicit version-bound approval and actual rollback execution evidence."""
 
 from copy import deepcopy
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -77,6 +78,39 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(digest, self.previous_sha)
         return {"session_id": environment.name + "-new-session", "passed": True,
                 "skill_sha256": digest, "probe_http_statuses": [200]}
+
+    def interrupt_completion(self, point):
+        """Deliver a control SIGINT at a real persistence boundary, not a native task."""
+        request = self.approval()
+        result_path = self.root / "rollbacks" / request["id"] / "result.json"
+        original_write = rollback.write_json
+
+        def interrupted_write(path, content):
+            final_state = (Path(path).resolve() == self.state_path.resolve()
+                           and content.get("operator_rollback", {}).get("status") == "verified")
+            exposed_result = Path(path).resolve() == result_path.resolve() and content.get("status") == "verified"
+            if (point == "authority" and final_state) or (point == "result" and exposed_result):
+                raise KeyboardInterrupt("completion commit interrupted")
+            return original_write(path, content)
+
+        with (patch.object(rollback, "publish", side_effect=self.fake_publish),
+              patch.object(rollback, "verify_task", side_effect=self.fake_verify),
+              patch.object(rollback, "scripted_model", return_value=nullcontext("http://unused.invalid")),
+              patch.object(rollback, "write_json", side_effect=interrupted_write)):
+            with self.assertRaisesRegex(KeyboardInterrupt, "commit interrupted"):
+                rollback.execute(self.root, request["id"])
+        return request
+
+    def reconcile_without_native_work(self, request):
+        with (patch.object(rollback, "publish", side_effect=AssertionError("must not republish")) as publish,
+              patch.object(rollback, "verify_task", side_effect=AssertionError("must not rerun tasks")) as verify,
+              patch.object(rollback, "replay_behavior", side_effect=AssertionError("must not replay")) as replay,
+              patch.object(rollback, "patrol_checkpoints", side_effect=AssertionError("completion already checked patrol"))):
+            result = rollback.execute(self.root, request["id"])
+        publish.assert_not_called()
+        verify.assert_not_called()
+        replay.assert_not_called()
+        return result
 
     def test_prepare_and_approve_have_no_publication_side_effect(self):
         before = self.state_path.read_bytes()
@@ -183,6 +217,47 @@ class RollbackTests(unittest.TestCase):
         self.assertEqual(result["status"], "verified")
         self.assertEqual(result["request_id"], request["id"])
         self.assertEqual(approval_path.read_bytes(), approval)
+
+    def test_interrupt_after_result_keeps_retry_visible_and_reconciles_authority(self):
+        request = self.interrupt_completion("authority")
+        directory = self.root / "rollbacks" / request["id"]
+        result_before = (directory / "result.json").read_bytes()
+        self.assertEqual(load_json(directory / "result.json")["status"], "verified")
+        self.assertEqual(load_json(self.state_path)["operator_rollback"]["status"], "awaiting_verification")
+        self.assertEqual(rollback.rollback_state(self.root)["requests"][0]["status"], "awaiting_verification")
+        with (patch.object(oncall_service, "completed_incidents", return_value=[]),
+              patch.object(oncall_service, "select_batch", return_value=None) as select):
+            oncall_service.learn_once(self.run, False, object(), {})
+            select.assert_not_called()
+            result = self.reconcile_without_native_work(request)
+            oncall_service.learn_once(self.run, False, object(), {})
+            select.assert_called_once()
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual((directory / "result.json").read_bytes(), result_before)
+        self.assertEqual(load_json(self.state_path)["operator_rollback"]["status"], "verified")
+        self.assertEqual(rollback.rollback_state(self.root)["requests"][0]["status"], "verified")
+
+    def test_interrupt_after_completion_journal_restores_missing_result_without_reexecution(self):
+        request = self.interrupt_completion("result")
+        directory = self.root / "rollbacks" / request["id"]
+        self.assertFalse((directory / "result.json").exists())
+        self.assertEqual(rollback.rollback_state(self.root)["requests"][0]["status"], "awaiting_verification")
+        result = self.reconcile_without_native_work(request)
+        self.assertEqual(load_json(directory / "result.json"), result)
+        self.assertEqual(load_json(self.state_path)["operator_rollback"]["status"], "verified")
+
+    def test_changed_completion_evidence_cannot_commit_or_republish(self):
+        request = self.interrupt_completion("authority")
+        state = load_json(self.state_path)
+        artifact = self.root / "rollbacks" / request["id"] / state["operator_rollback"]["completion"]["artifact"]
+        artifact.write_bytes(artifact.read_bytes() + b"\n")
+        with (patch.object(rollback, "publish") as publish,
+              patch.object(rollback, "verify_task") as verify):
+            with self.assertRaisesRegex(ValueError, "completion evidence changed"):
+                rollback.execute(self.root, request["id"])
+        publish.assert_not_called()
+        verify.assert_not_called()
+        self.assertEqual(load_json(self.state_path)["operator_rollback"]["status"], "awaiting_verification")
 
     def test_older_verified_request_can_add_frozen_proof_without_republishing(self):
         request = self.approval()
