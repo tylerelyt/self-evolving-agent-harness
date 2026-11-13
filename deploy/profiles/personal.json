@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "personal",
+  "purpose": "personal",
+  "state_dir": "../../var/personal",
+  "command": ["{python}", "{repo}/deploy/personal.py", "gateway"],
+  "doctor_command": ["{python}", "{repo}/deploy/personal.py", "doctor"],
+  "setup_command": ["{python}", "{repo}/deploy/personal.py", "setup"],
+  "environment": {},
+  "stop_timeout": 30,
+  "settings": {"learning": "native-hermes-candidate-workspace", "governed_execution": "deploy/personal.py govern task", "sharing_intent": "profile-local", "capability_scope": "personal"}
+}

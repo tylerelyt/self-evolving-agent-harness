@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "self-evolving-agent-harness"
+version = "0.1.0.dev0"
+description = "Evidence-based learning and release primitives for long-lived agents"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+dependencies = []
+
+[project.scripts]
+rsi-harness = "self_evolving_harness.deployment:main"
+rsi-oncall = "apps.oncall.__main__:main"
+rsi-personal = "self_evolving_harness.personal:main"
+rsi-tool-gateway = "apps.dedicated.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["self_evolving_harness*", "apps*"]
+
+[tool.setuptools.package-data]
+"apps.oncall" = ["web/*.html", "patrol/skills/*/SKILL.md", "integrations/versions.json", "integrations/dataset/dependencies.json", "integrations/dataset/skills/*/SKILL.md"]

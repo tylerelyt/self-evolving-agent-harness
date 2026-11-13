@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1450" viewBox="0 0 1920 1450">
+  <title>长期运行的 Harness RSI 系统：个人部署、企业专用 Harness 与独立教程</title>
+  <desc>个人与企业部署共用 RSI 核心机制，分别隔离状态和授权。系统持续执行、记录经历、后台学习、生成候选、独立评测、批准发布并验证下一轮采用。教程围绕系统版本展开；Harness 与改进者演化是目标扩展。</desc>
+  <defs>
+    <marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#12858b"/></marker>
+    <marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#d4663b"/></marker>
+    <marker id="gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7a8987"/></marker>
+    <style>
+      text{font-family:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#2b4841}
+      .title{font-size:43px;font-weight:650}.subtitle{font-size:25px;fill:#59736c}
+      .section{font-size:29px;font-weight:650}.heading{font-size:31px;font-weight:650}
+      .body{font-size:25px;fill:#4c6860}.note{font-size:22px;fill:#607a72}
+      .label{font-size:22px;fill:#177c82}.warm{fill:#c45b35}
+      .card{fill:#fff;stroke:#7ba7a1;stroke-width:2.2;rx:7}
+      .arrow{fill:none;stroke:#12858b;stroke-width:2.8;marker-end:url(#teal)}
+      .learning{fill:none;stroke:#d4663b;stroke-width:2.8;marker-end:url(#orange)}
+      .future{fill:none;stroke:#7a8987;stroke-width:2.2;stroke-dasharray:9 7;marker-end:url(#gray)}
+    </style>
+  </defs>
+  <rect width="1920" height="1450" fill="#ffffff"/>
+  <text x="60" y="74" class="title">长期运行的 Harness RSI 系统｜目标架构</text>
+  <text x="63" y="119" class="subtitle">个人日常使用与企业专用 Harness 共用 RSI 机制；On-call 是首个验证场景</text>
+
+  <rect x="50" y="157" width="1290" height="260" rx="15" fill="#f3f7f5" stroke="#c3d8d2" stroke-width="2"/>
+  <text x="77" y="199" class="section">部署与适配</text>
+  <text x="1313" y="199" text-anchor="end" class="note">共用实现，状态与授权分别隔离</text>
+  <rect x="80" y="223" width="580" height="164" class="card"/>
+  <text x="105" y="267" class="heading">个人 Harness</text>
+  <text x="105" y="308" class="body">日常任务、个人 Memory 与 Skill</text>
+  <text x="105" y="349" class="body">独立运行空间 · 模型与渠道配置</text>
+  <rect x="710" y="223" width="600" height="164" class="card"/>
+  <text x="735" y="267" class="heading">专用 / 企业 Harness</text>
+  <text x="735" y="308" class="body">专用上下文、工具、权限与评测</text>
+  <text x="735" y="349" class="body">可替换执行适配器 · 独立部署</text>
+
+  <rect x="1400" y="157" width="470" height="260" rx="15" fill="#fafbf9" stroke="#a7b6af" stroke-width="2" stroke-dasharray="9 7"/>
+  <text x="1428" y="202" class="section">Tutorial｜独立教学</text>
+  <text x="1428" y="253" class="body">固定系统版本，组织练习</text>
+  <text x="1428" y="296" class="body">搭建、观察、修改、验证</text>
+  <text x="1428" y="350" class="note">不进入系统运行与发布链路</text>
+
+  <path d="M370 387V439H650V467" class="arrow"/>
+  <path d="M1010 387V439H790V467" class="arrow"/>
+  <text x="1060" y="450" class="label">接入同一组核心契约</text>
+  <path d="M1675 470V417" class="future"/>
+  <text x="1710" y="449" class="note">版本化教学</text>
+
+  <rect x="50" y="470" width="1820" height="638" rx="15" fill="#eff6f5" stroke="#bdd6d1" stroke-width="2"/>
+  <text x="78" y="515" class="section">共享 RSI 核心｜持续执行、学习、验证与采用</text>
+  <rect x="90" y="545" width="370" height="205" class="card"/>
+  <text x="115" y="589" class="heading">控制面与工作世界</text>
+  <text x="115" y="633" class="body">任务 / 外部事件 / 监控告警</text>
+  <text x="115" y="674" class="body">范围、状态、执行所有权</text>
+  <text x="115" y="715" class="body">工具动作与人的授权</text>
+
+  <rect x="560" y="545" width="420" height="205" class="card"/>
+  <text x="585" y="589" class="heading">Harness 执行层</text>
+  <text x="585" y="633" class="body">模型 · 工具 · Memory / Skill</text>
+  <text x="585" y="674" class="body">持续工作、steer、resume / fork</text>
+  <text x="585" y="715" class="body">Hermes 为首个运行时适配器</text>
+
+  <rect x="1110" y="545" width="680" height="205" class="card"/>
+  <text x="1135" y="589" class="heading">证据与知识层</text>
+  <text x="1135" y="633" class="body">原始经历：Session / Item、工具回执、业务结果</text>
+  <text x="1135" y="674" class="body">可检索事实：来源、范围、时效、版本</text>
+  <text x="1135" y="715" class="body">学习材料与评测题包分别构建、独立管理</text>
+  <path d="M460 618H560" class="arrow"/>
+  <path d="M560 703H460" class="arrow"/>
+  <text x="510" y="603" text-anchor="middle" class="label">事件</text>
+  <text x="510" y="733" text-anchor="middle" class="label">行动</text>
+  <path d="M980 620H1110" class="arrow"/>
+  <path d="M1110 702H980" class="arrow"/>
+  <text x="1045" y="603" text-anchor="middle" class="label">留证</text>
+  <text x="1045" y="733" text-anchor="middle" class="label">检索</text>
+
+  <path d="M1445 750V802H275V856" class="arrow"/>
+  <text x="785" y="791" class="label">从真实经历生成有来源、可追查的学习材料</text>
+
+  <rect x="90" y="860" width="370" height="175" class="card"/>
+  <text x="115" y="904" class="heading">后台学习</text>
+  <text x="115" y="947" class="body">Memory 整理 · Skill 演化</text>
+  <text x="115" y="990" class="body">SkillClaw · 反思 · Curation</text>
+  <rect x="560" y="860" width="285" height="175" class="card"/>
+  <text x="585" y="904" class="heading">候选版本库</text>
+  <text x="585" y="947" class="body">内容、父版本、来源</text>
+  <text x="585" y="990" class="body">隔离生成，保留谱系</text>
+  <rect x="945" y="860" width="365" height="175" fill="#fffdf9" stroke="#d99577" stroke-width="2.2" rx="7"/>
+  <text x="970" y="904" class="heading">独立评测</text>
+  <text x="970" y="947" class="body">真实工具回放 · 回归</text>
+  <text x="970" y="990" class="body">效果、成本、泛化与权限</text>
+  <rect x="1410" y="860" width="380" height="175" fill="#fffdf9" stroke="#d99577" stroke-width="2.2" rx="7"/>
+  <text x="1435" y="904" class="heading">发布与实际采用</text>
+  <text x="1435" y="947" class="body">批准 · 分发 · 采用回执</text>
+  <text x="1435" y="990" class="body">持续观察 · 停止与回退</text>
+  <path d="M460 948H560" class="learning"/>
+  <path d="M845 948H945" class="learning"/>
+  <path d="M1310 948H1410" class="learning"/>
+  <path d="M1600 1035V1075H68V652H90" class="arrow"/>
+  <rect x="608" y="1054" width="698" height="37" fill="#eff6f5"/>
+  <text x="957" y="1080" text-anchor="middle" class="label">批准的改进进入下一轮工作，再产生新的学习经历</text>
+
+  <rect x="50" y="1140" width="1820" height="182" rx="15" fill="#faf8f3" stroke="#b4b8ac" stroke-width="2" stroke-dasharray="10 7"/>
+  <text x="78" y="1185" class="section">更深层的自进化｜目标扩展</text>
+  <text x="1840" y="1185" text-anchor="end" class="note">仍走同一套候选 → 评测 → 发布契约</text>
+  <text x="91" y="1235" class="heading">Harness 代码演化</text>
+  <text x="91" y="1280" class="body">优化上下文、检索、工具适配与执行策略</text>
+  <line x1="916" y1="1210" x2="916" y2="1293" stroke="#d6d8cc" stroke-width="2"/>
+  <text x="960" y="1235" class="heading">改进者演化</text>
+  <text x="960" y="1280" class="body">优化经历筛选、反思与搜索；独立验证后代收益</text>
+
+  <line x1="65" y1="1377" x2="113" y2="1377" stroke="#12858b" stroke-width="3" marker-end="url(#teal)"/>
+  <text x="130" y="1385" class="note">执行与留证</text>
+  <line x1="350" y1="1377" x2="398" y2="1377" stroke="#d4663b" stroke-width="3" marker-end="url(#orange)"/>
+  <text x="415" y="1385" class="note">学习与发布</text>
+  <line x1="635" y1="1377" x2="683" y2="1377" stroke="#7a8987" stroke-width="2.2" stroke-dasharray="8 6"/>
+  <text x="700" y="1385" class="note">教学关系 / 目标扩展</text>
+  <text x="63" y="1424" class="note">实现边界：个人评测发布、单机持久恢复与专用权限网关已验证；生产灰度、多机调度与深层演化仍按路线建设。</text>
+</svg>

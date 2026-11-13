@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "dedicated-oncall",
+  "purpose": "dedicated",
+  "state_dir": "../../var/dedicated-oncall",
+  "command": [
+    "{python}",
+    "{repo}/deploy/oncall.py",
+    "serve",
+    "--out",
+    "{state}/runs/current",
+    "--resume"
+  ],
+  "doctor_command": [
+    "{python}",
+    "{repo}/deploy/oncall.py",
+    "--help"
+  ],
+  "environment": {},
+  "stop_timeout": 120,
+  "settings": {
+    "workload": "oncall-local",
+    "verification_mode": "scripted-model",
+    "enterprise_identity": "not_integrated"
+  }
+}

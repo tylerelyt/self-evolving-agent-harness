@@ -23,6 +23,25 @@ const sandbox={console,document:{getElementById:node,querySelector(selector){ret
 }if(body.action==='chat_send'){chats[body.conversation].messages.push({id:calls.length,role:'user',content:body.question});return{ok:true,json:async()=>({accepted:true})};}}if(path==='/api/state')return{ok:true,json:async()=>JSON.parse(JSON.stringify(snapshotOverride||state))};if(path.startsWith('/api/chat?'))return{ok:true,json:async()=>JSON.parse(JSON.stringify(chats[new URL('http://local'+path).searchParams.get('conversation')]))};throw new Error('Unexpected request '+path);}};
 vm.createContext(sandbox);vm.runInContext(html.split('<script>')[1].split('</script>')[0],sandbox);
 (async()=>{await new Promise(resolve=>setImmediate(resolve));
+
+ assert.equal(node('workspace').textContent,'本地运行工作区');
+ assert(!node('code-path').textContent.includes('/fixture/'),'implementation display must not reveal machine paths');
+ assert.equal(vm.runInContext("implementationLabel('/Users/private/project/apps/oncall/workflow.py')",sandbox),'apps/oncall/workflow.py');
+ assert.equal(vm.runInContext("implementationLabel('/private/tmp/custom-secret.py')",sandbox),'外部实现文件');
+ assert.equal(state.root,'/tmp/ui-test-workbench','display labels must preserve backend path bindings');
+ assert.equal(node('open-practice').textContent,'练习与运行','legacy/tutorial snapshots retain the coding guide');
+ assert.equal(node('tutorial-controls').hidden,false);
+ state.mode='system';state.agent.stages=[];await vm.runInContext('refresh()',sandbox);
+ assert.equal(node('open-practice').textContent,'运行与管理');
+ assert.equal(node('practice-title').textContent,'运行与管理');
+ assert.equal(node('tutorial-controls').hidden,true,'maintained runtime must hide coding exercises');
+ assert.equal(node('stages').innerHTML,'');
+ assert.equal(node('check').disabled,true);
+ assert(!node('capability-note').textContent.includes('应用代码'));
+ const beforeCheck=calls.length;node('check').onclick();await node('copy-prompt').onclick();
+ assert.equal(calls.length,beforeCheck,'system mode must not issue hidden teaching commands');
+ state.mode='tutorial';state.agent.stages=[1,2,3,4].map(number=>({number,title:'step '+number,implemented:false}));await vm.runInContext('refresh()',sandbox);
+ assert.equal(node('tutorial-controls').hidden,false,'explicit tutorial mode restores the guide');
  assert(node('chat-question').disabled,'offline must disable chat');
  assert(node('overview-content').innerHTML.includes('监控已发出告警'),'offline raw alerts must be visible');
  assert(!node('overview-content').innerHTML.includes('learner.py'),'source path must stay out of business content');

@@ -1,10 +1,40 @@
-# 自进化 Agent 实战
+# Self-Evolving Agent Harness
 
-极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的配套代码。每讲有自己的练习目录、运行说明和验收记录，按正文顺序进入即可。
+面向持续工作与经验学习的自进化 Harness 工程项目，以 On-call 系统为首个完整场景：持续巡检，处理外部告警，保存执行证据，从经历中改进 Memory／Skill，经独立评测后发布，并在后续任务中验证实际采用。
+
+部署面向日常个人 Harness 和专用 Harness：个人使用有独立运行空间，企业适配器可以接入自己的上下文、工具、权限与评测；tutorial 是这套系统的教学入口。
+
+系统按独立的架构、接口和版本持续迭代；tutorial 教授它的稳定版本。运行代码、工作台、工具和集成适配位于 `apps/`，共享核心位于 `src/self_evolving_harness`，课程保留独立练习和兼容入口。
+
+- [系统架构与设计](docs/architecture/README.md)
+- [部署个人与专用 Harness](deploy/README.md)
+- [运行持续 On-call 系统](apps/oncall/README.md)
+- [个人 Skill 的评测、发布与采用](deploy/PERSONAL-LEARNING.md)
+- [接入专用工具与恢复权限](apps/oncall/ENTERPRISE.md)
+- [长期迭代路线与验收边界](docs/architecture/ROADMAP.md)
+- [Tutorial 入口与版本对应](tutorials/README.md)
+- [参与维护](CONTRIBUTING.md)
+
+![长期运行的 Harness RSI 系统目标架构](assets/images/maintained-rsi-system.png)
+
+目标架构总览：个人与企业部署共用 RSI 核心，tutorial 独立教学；底部单列深层演化扩展，实际实现边界见图注。
+
+本 repo 同时提供极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的教学代码，各讲仍有独立的练习目录、运行说明和验收记录。
 
 [![综合实战 On-call 工作台：服务指标、故障告警与并行调查](assets/images/oncall-workbench.png)](workshop/capstone/README.md#启动本地工作台)
 
 综合实战工作台实拍：两套本地 HTTP 环境、持续巡检、故障告警与并行调查。截图使用脚本模型演示；[启动工作台](workshop/capstone/README.md#启动本地工作台)。
+
+## 运行系统
+
+```bash
+bash scripts/setup_deps.sh
+bash scripts/setup_skillclaw.sh
+.deps/hermes-agent/.venv/bin/python deploy/manage.py launch \
+  --profile deploy/profiles/dedicated-oncall.json
+```
+
+默认以脚本模型启动持续服务；重启沿用同一状态目录、会话与批准版本。个人 Harness、真实模型、工作台及专用权限网关的配置见上方各入口；教程的受控两轮演练单独运行。
 
 ## 逐讲练习
 

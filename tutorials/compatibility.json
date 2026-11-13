@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-11-13",
+  "implementation_status": "maintained applications and shared core extracted; existing teaching commands remain compatibility entries",
+  "system_release": null,
+  "tutorials": [
+    {
+      "id": "oncall-integrated",
+      "baseline_commit": "8fcd907419fa002ef385bd76683413151edd92b6",
+      "entry": "workshop/capstone/README.md",
+      "walkthrough": "workshop/capstone/WALKTHROUGH.md",
+      "learner_entry": "workshop/capstone/lab/README.md",
+      "learner_surface": "workshop/capstone/lab/self_improvement_agent.py",
+      "reference_entry": "workshop/capstone/self_improvement_agent.py",
+      "dependencies": {
+        "hermes_agent": "aaf9688519cca58dd5f76a589a0911aff269b060",
+        "skillclaw": "334ddf82856826b7a259470c6670fb0ef5ce2dc4"
+      },
+      "verification": {
+        "controlled_full_workflow": "scripted model with real local Hermes, HTTP and SkillClaw execution",
+        "real_model": "partial integration; full quality acceptance pending",
+        "production_distributed_runtime": "design only",
+        "autonomous_harness_and_improver_evolution": "planned extension"
+      }
+    }
+  ]
+}

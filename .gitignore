@@ -16,6 +16,7 @@ node_modules/
 **/headless-lab-*/
 .tmp-ppt/
 .deps/
+/.deps
 .venv/
 **/.venv/
 **/__pycache__/
@@ -44,6 +45,14 @@ scripts/__pycache__/
 # 内部工作清单、单测与运行临时目录，不随练习发布
 /download.txt
 /tests/
+!/tests/
+/tests/*
+!/tests/core/
+/tests/core/*
+!/tests/core/*.py
+*.egg-info/
+dist/
+/var/
 **/consolidate_runs/
 
 # 作者自查材料与执行输出，仅保留在本地
@@ -70,5 +79,12 @@ examples/01-agent-loop/修订核查/
 
 # 本地评审工作区与文档草稿，不随练习发布
 /_review/
-/docs/
+/docs/*
+# 长期工程设计纳入版本；其他本地文档草稿继续忽略。
+!/docs/architecture/
+/docs/architecture/*
+!/docs/architecture/*.md
+!/docs/adr/
+/docs/adr/*
+!/docs/adr/*.md
 examples/23-final-assembly/history/
