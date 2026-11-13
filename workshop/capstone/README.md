@@ -36,6 +36,10 @@ bash scripts/setup_skillclaw.sh
 
 打开终端给出的地址，点击「启动 Agent」。先在「概览」「指标」「日志」「变更」看正常流量，再从「练习与运行」注入故障。调查交接后，在事故中「申请恢复」，核对范围与报告，再「批准并执行本地恢复」。两个独立健康窗口通过后，审批账本才关闭。Memory 和 Skill 学习页分别展示历史事实与方法版本。
 
+「Memory」还提供「入口与 Memory 修订」：按按钮逐步观察旧入口、迁移、410→200 排查、原生后台 `memory replace` 和新会话采用。「Skill 学习」的「正式版本回退」先准备绑定版本的方案，明确批准后发布上一批准版本，并核对两端新会话、持续巡检与冻结现场行为对照。每一步的截图、动作和观察点见[完整演示导览](WALKTHROUGH.md)。
+
+「设计说明」区分本次实际运行证据与生产灰度、权限、监控和分布式恢复要求；完整方案见[生产扩展设计与系统设计练习](PRODUCTION-DESIGN.md)。设计画面不表示本地演练已经接入企业认证或生产流量。
+
 ### 使用真实模型
 
 ```bash
@@ -96,7 +100,7 @@ bash scripts/setup_skillclaw.sh
 
 第一轮事故的分支报告和恢复回执也用于提炼独立的 `oncall-recovery-window-check`。原生后台把新方法写到候选 Home。Curator 在另一份候选库里归档构造的过时草稿，并保护正式初判 Skill。候选通过独立的恢复窗口用例后，才按内容哈希保存为获准版本。第二轮的新会话实际加载这一版，复核另一起事故的恢复证据。这个复核任务只读，事故关闭仍由审批和状态机决定。
 
-演练收齐原生调查归档并确认恢复后，启动 Evolve Server。候选进入隔离的验证队列。业务回放使用独立的固定快照，分别核对持续失败、间歇失败和首次探测未复现。新版本只有在通过全部用例、且至少修复一个旧版失败时，才按验收哈希发布到正式 SkillHub。A、B 各自拉取，然后交换故障类型，在新的调查会话中再次读取 Skill。第二轮须核对两端的探测顺序和结论。任一端未证明新版行为，就恢复上一个批准版本。两份验证通过的经历继续进入演化。第二轮产出的合格候选留待下一次现场任务验证。
+演练收齐原生调查归档并确认恢复后，启动 Evolve Server。课程工程分析模板先核对真实补查分支，将有来源的改进方向加入实际候选修订请求；原生会话队列仍然只有两份初判。模板和脚本模型的作用均单独标明，不能将预设改进策略说成模型自主发现。候选进入隔离的验证队列。业务回放使用独立的固定快照，分别核对持续失败、间歇失败和首次探测未复现。新版本只有在通过全部用例、且至少修复一个旧版失败时，才按验收哈希发布到正式 SkillHub。A、B 各自拉取，然后交换故障类型，在新的调查会话中再次读取 Skill。第二轮须核对两端的探测顺序和结论。任一端未证明新版行为，就恢复上一个批准版本。两份验证通过的经历继续进入演化。第二轮产出的合格候选留待下一次现场任务验证。
 
 默认使用本机脚本模型，无需 API key。Hermes 工具调用、HTTP 流量、SkillClaw 原生归档、演化与 SkillHub 同步实际运行。可选的 `--live` 使用已配置的 `GLM_API_KEY`、`GLM_MODEL` 与 `GLM_BASE_URL`，会产生模型请求。受控两轮的完整验收使用脚本模型；真实模型目前完成工作台前台、问答与 Memory 的部分联调，完整两轮尚未验收。
 
@@ -117,6 +121,9 @@ bash scripts/setup_skillclaw.sh
 | `round-2/route-migration/sequence.json` | 旧入口可用的基线、迁移后的两次 HTTP 回执、原生替换和新会话首次查询 |
 | `round-1/recovery-skill/sequence.json` | 事故回执、新 Skill 候选、Curator 归档与保护记录、独立评测和获准哈希 |
 | `round-2/recovery-skill/adopt/result.json` | 新会话实际读取获准 Skill 后对另一事故的恢复复核 |
+| `round-*/engineering-analysis.json` | 工程分析策略、原初判与真实补查回执、分析内容及其哈希 |
+| `round-*/staging/queue-inputs.json` | 原生队列消费前的清单，核对只有两份初判，无补查分支 |
+| `round-*/staging/execution-request-*.json` | 候选修订时实际发送的消息、参数与工程分析哈希 |
 | `round-*/staging/evolution.json` | 演化使用的两份原生会话、候选父版本与候选哈希 |
 | `round-*/evaluation/evaluation.json` | 有候选时生成，含新旧版本的逐题工具证据和门槛决定 |
 | `round-*/recovery.json` | 两端关闭事故时的最终恢复窗口 |
@@ -179,7 +186,7 @@ ENV_SCRIPT=workshop/capstone/patrol/environment.py
 
 真实模型运行使用同一入口，加 `--live` 并设置 `GLM_API_KEY`。可选的 `GLM_MODEL` 和 `GLM_BASE_URL` 控制模型与端点。首次核对接线可以先运行默认脚本模型。旧的 `patrol/fleet.py` 入口继续接受原参数，默认委托同一个完整实现。
 
-持续模式覆盖核心值守与后台学习。Memory 迁移、恢复复核 Skill、GEPA、OpenViking 和 Langfuse 等综合能力通过受控双轮演练验证。`--serve` 与 `--gepa`、`--enterprise`、`--langfuse`、`--openviking`、`--rehearse-rollback` 分别运行，CLI 会拒绝将持续模式与这些受控演练参数混用。
+持续模式覆盖核心值守与后台学习。Memory 迁移与受控回退也可直接在工作台分步操作。恢复复核 Skill 和外部服务接入另有受控演练入口；GEPA、OpenViking、Langfuse 是否启用及通过，以本次运行的原始回执为准，不能从本地工作台截图推断已经完成远端接入。`--serve` 与 `--gepa`、`--enterprise`、`--langfuse`、`--openviking`、`--rehearse-rollback` 分别运行，CLI 会拒绝将持续模式与这些受控演练参数混用。
 
 ## 进阶实验
 

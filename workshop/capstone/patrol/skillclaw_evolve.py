@@ -15,6 +15,7 @@ from hermes_runtime import ONCALL_SKILL, ROOT
 STAGING_GROUP = "patrol-evolution"
 FORMAL_GROUP = "patrol-formal"
 REPEAT_PROBE = "首次探测返回 5xx 时，再调用一次 oncall_probe"
+ENGINEERING_MARKER = "\n\nCOURSE_ENGINEERING_ANALYSIS\n"
 
 
 def _hub(shared: Path, group: str, alias: str):
@@ -116,6 +117,14 @@ def _scripted_reply(messages: list[dict], baseline: dict, source_ids: set[str]) 
 
     body = baseline["content"]
     has_5xx = re.search(r'oncall_probe\([^\n]*"http_status"\s*:\s*5\d{2}', user)
+    _, marker, encoded = user.partition(ENGINEERING_MARKER)
+    if marker:
+        guidance = json.loads(encoded)
+        cases = guidance["cases"]
+        if {case["source_session_id"] for case in cases} != source_ids:
+            raise RuntimeError("工程师分析没有对应本轮原始初判会话。")
+        has_5xx = has_5xx and any(case["method_recommendation"]["action"] == "add_bounded_second_probe"
+                                 for case in cases)
     if REPEAT_PROBE in body or not has_5xx:
         return json.dumps({"action": "skip", "rationale": "已覆盖二次探测，或本批缺少支持修订的 5xx 回执。"}, ensure_ascii=False)
     body = body.replace("assessment 在单次 5xx 时用 failure_observed，在首次探测为 2xx 时用 not_reproduced。", "")
@@ -135,6 +144,7 @@ def _scripted_reply(messages: list[dict], baseline: dict, source_ids: set[str]) 
 
 def evolve(
     root: Path, baseline: Path, source_sessions: list[Path], connection: dict | None = None,
+    *, engineering_analysis: dict | None = None,
 ) -> tuple[Path | None, dict]:
     """Run SkillClaw once with staging-only validation jobs."""
     from evolve_server.core.config import EvolveServerConfig
@@ -147,7 +157,33 @@ def evolve(
     source, baseline_sha = _snapshot(root, content)
     baseline_skill = parse_skill_content(ONCALL_SKILL, content.decode("utf-8"))
     archives = _stage_sessions(root, source_sessions, baseline_sha)
+    source_ids = {archive["session_id"] for archive in archives}
+    guidance = None
+    analysis_summary = None
+    execution_requests = []
+    if engineering_analysis is not None:
+        from engineering_analysis import load_analysis
+
+        guidance = load_analysis(engineering_analysis, baseline_sha, source_ids)
+        analysis_summary = {
+            "artifact": engineering_analysis["path"], "sha256": engineering_analysis["sha256"],
+            "guidance_sha256": engineering_analysis["guidance_sha256"],
+            "policy_id": guidance["policy"]["id"], "policy_kind": guidance["policy"]["kind"],
+            "policy_author": guidance["policy"]["author"], "source_ids": sorted(source_ids),
+            "branch_sources": guidance["cases"],
+        }
+
     shared = root / "shared"
+    queue_manifest = root / "queue-inputs.json"
+    queued = []
+    for record in archives:
+        path = shared / STAGING_GROUP / "sessions" / f"{record['session_id']}.json"
+        raw = path.read_bytes()
+        if json.loads(raw)["session_id"] != record["session_id"]:
+            raise ValueError("Native evolution queue differs from its recorded initial sessions")
+        queued.append({"session_id": record["session_id"], "instance": record["instance"],
+                       "sha256": sha256(raw).hexdigest()})
+    queue_manifest.write_text(json.dumps(queued, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _push(shared, STAGING_GROUP, source, baseline_sha)
     scripted = connection is None
     options = connection or {"base_url": "http://127.0.0.1:1/v1", "api_key": "local-script", "model": "patrol-script"}
@@ -161,17 +197,33 @@ def evolve(
     ))
     engine._llm._client = engine._llm._client.with_options(timeout=120, max_retries=0)
     original_chat = engine._llm.chat
-    source_ids = {archive["session_id"] for archive in archives}
 
     async def chat(messages, **kwargs):
-        if scripted:
-            return _scripted_reply(messages, baseline_skill, source_ids)
         kwargs["max_tokens"] = min(kwargs.get("max_tokens", 6000), 6000)
         if "Return EXACTLY one JSON object" in messages[0]["content"]:
             kwargs["response_format"] = {"type": "json_object"}
-        response = await original_chat(messages, **kwargs)
+        execution = "edit the ORIGINAL skill" in messages[0]["content"]
+        request_record = None
+        if execution:
+            from engineering_analysis import digest
+
+            messages = [dict(message) for message in messages]
+            if guidance is not None:
+                user = next(message for message in messages if message["role"] == "user")
+                user["content"] += ENGINEERING_MARKER + json.dumps(guidance, ensure_ascii=False, sort_keys=True)
+            path = root / f"execution-request-{len(execution_requests) + 1:04d}.json"
+            payload = {"messages": messages, "parameters": kwargs,
+                       "engineering_analysis_sha256": engineering_analysis["guidance_sha256"] if guidance else None}
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            request_record = {"path": str(path), "messages_sha256": digest(messages),
+                              "engineering_analysis_sha256": payload["engineering_analysis_sha256"], "status": "requested"}
+            execution_requests.append(request_record)
+        response = (_scripted_reply(messages, baseline_skill, source_ids) if scripted
+                    else await original_chat(messages, **kwargs))
         if not response.strip():
             raise RuntimeError("SkillClaw 模型响应为空。")
+        if request_record is not None:
+            request_record.update(status="completed", response_sha256=sha256(response.encode()).hexdigest())
         return response
 
     engine._llm.chat = chat
@@ -188,8 +240,12 @@ def evolve(
     summary = {
         "model": options["model"], "scripted_model": scripted, "sources": archives,
         "baseline_sha256": baseline_sha, "native_workflow": native,
-        "compatibility": compatibility, "status": "keep",
+        "compatibility": compatibility, "status": "keep", "execution_requests": execution_requests,
+        "queue_manifest": {"path": str(queue_manifest), "sha256": sha256(queue_manifest.read_bytes()).hexdigest(),
+                           "session_ids": sorted(source_ids)},
     }
+    if analysis_summary is not None:
+        summary["engineering_analysis"] = analysis_summary
     candidate = None
     records = native["evolutions"]
     staging = shared / STAGING_GROUP
@@ -208,6 +264,11 @@ def evolve(
                 status="candidate", candidate=str(candidate),
                 candidate_sha256=sha256(candidate.read_bytes()).hexdigest(),
             )
+    if guidance is not None and records and not any(
+        request["status"] == "completed" and request["engineering_analysis_sha256"] == engineering_analysis["guidance_sha256"]
+        for request in execution_requests
+    ):
+        summary["status"] = "failed"
     if sha256((staging / "skills" / ONCALL_SKILL / "SKILL.md").read_bytes()).hexdigest() != baseline_sha:
         summary["status"] = "failed"
     (root / "evolution.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

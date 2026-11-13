@@ -26,7 +26,8 @@ from hermes_runtime import ONCALL_SKILL
 from patrol import checkpoint, connect, decode_report, incidents
 
 ALIASES = ("instance-a", "instance-b")
-JOB_LABELS = {"question": "追问", "chat": "SRE 对话", "memory_review": "Memory 复盘", "memory_recall": "新会话召回"}
+JOB_LABELS = {"question": "追问", "chat": "SRE 对话", "memory_review": "Memory 复盘", "memory_recall": "新会话召回",
+              "diagnostic": "诊断入口与 Memory", "rollback": "Skill 回退与验证"}
 from lab.stages import STAGES, stage_status
 
 
@@ -531,6 +532,74 @@ class Workbench:
         return self.add_job("question", identifier, command, directory / "question.log", source=source,
                             incident_id=incident_id, question=question, result=str(result.relative_to(self.root)))
 
+    def start_diagnostic(self, action):
+        from workbench_evolution import ACTIONS
+        if action not in ACTIONS:
+            raise ValueError("Unknown diagnostic stage")
+        if self.agent_status() != "running" or self.record.get("active_stage", 0) < 3:
+            raise ValueError("先启动具备 Memory 能力的 Agent。")
+        identifier = uuid4().hex[:12]
+        command = [sys.executable, "-B", str(HERE / "workbench_evolution.py"),
+                   "--state", str(self.root), "--action", action]
+        if self.live:
+            command.append("--live")
+        return self.add_job("diagnostic", identifier, command,
+                            self.root / "evolution/jobs" / f"{identifier}.log", action=action)
+
+    def rollback_action(self, body, request_context):
+        from workbench_rollback import approve, prepare
+        if body["action"] == "rollback_prepare":
+            return prepare(self.root, self.active_run)
+        if body["action"] == "rollback_approve":
+            if body.get("confirmed") is not True:
+                raise ValueError("需要明确批准本次 Skill 回退。")
+            approve(self.root, body.get("request_id"), body.get("from_sha256"), body.get("to_sha256"),
+                    request_context=request_context)
+        identifier = uuid4().hex[:12]
+        command = [sys.executable, "-B", str(HERE / "workbench_rollback.py"), "--state", str(self.root),
+                   "--action", "execute", "--request-id", str(body.get("request_id", ""))]
+        if self.live:
+            command.append("--live")
+        return self.add_job("rollback", identifier, command,
+                            self.root / "rollbacks/jobs" / f"{identifier}.log", request_id=body.get("request_id"))
+
+    def evolution_snapshot(self):
+        from workbench_evolution import diagnostic_snapshot
+        from workbench_rollback import rollback_state
+        diagnostic = diagnostic_snapshot(self.root)
+        for stage in (diagnostic.get("stages", {}) if diagnostic.get("evidence_valid") else {}).values():
+            directory = Path(diagnostic["artifact_root"]) / Path(stage["artifact"]).parent
+            if self.persisted_session_database(directory / "hermes/state.db"):
+                stage["source"] = "evolution:" + directory.relative_to(self.root).as_posix()
+        rollback = rollback_state(self.root)
+        for request in rollback["requests"]:
+            for alias, proof in (request.get("result") or {}).get("verifications", {}).items():
+                for database in (self.root / "rollbacks" / request["id"] / "verification").glob(f"*/{alias}/hermes/state.db"):
+                    if not database.resolve().is_relative_to(self.root):
+                        continue
+                    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as sessions:
+                        if sessions.execute("SELECT 1 FROM sessions WHERE id=?", (proof["session_id"],)).fetchone():
+                            proof["source"] = "evolution:" + database.parent.parent.relative_to(self.root).as_posix()
+                            break
+            for replay in (request.get("result") or {}).get("behavior_replay", {}).values():
+                for arm in ("restored", "adopted"):
+                    proof = replay[arm]
+                    database = Path(proof["database"])
+                    if database.resolve().is_relative_to(self.root) and database.is_file():
+                        proof["source"] = "evolution:" + database.parent.parent.relative_to(self.root).as_posix()
+        jobs = [job for job in self.record["jobs"] if job["kind"] in ("diagnostic", "rollback")]
+        return {"diagnostic": diagnostic, "rollback": rollback, "jobs": jobs[-12:]}
+
+    def persisted_session_database(self, database):
+        """Background Review may create a state DB without persisting Sessions."""
+        if not database.resolve().is_relative_to(self.root) or not database.is_file():
+            return False
+        try:
+            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+                return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'").fetchone() is not None
+        except sqlite3.Error:
+            return False
+
     def memory_snapshot(self):
         from workbench_memory import memory_state
 
@@ -801,6 +870,10 @@ class Workbench:
                 return self.start_check(body.get("stage"))
             if action in ("memory_review", "memory_recall"):
                 return self.start_memory(action.removeprefix("memory_"), body.get("incident_id"))
+            if isinstance(action, str) and action.startswith("diagnostic_"):
+                return self.start_diagnostic(action)
+            if action in ("rollback_prepare", "rollback_approve", "rollback_execute"):
+                return self.rollback_action(body, request_context)
             if action == "question":
                 return self.start_question(body)
             if action == "chat_new":
@@ -829,7 +902,15 @@ class Workbench:
             sources[f"chat:{database.parent.parent.name}"] = database.parent.parent
         for database in (self.root / "chat").glob("*/threads/*/hermes/state.db"):
             sources[f"chat-thread:{database.parents[3].name}/{database.parent.parent.name}"] = database.parent.parent
-        return sources
+        for prefix, pattern in (("evolution/diagnostic-memory", "*/*/*/*/hermes/state.db"),
+                                ("rollbacks", "*/verification/*/*/hermes/state.db"),
+                                ("rollbacks", "*/behavior-replay/*/*/*/hermes/state.db")):
+            for database in (self.root / prefix).glob(pattern):
+                directory = database.parent.parent
+                if self.persisted_session_database(database):
+                    sources["evolution:" + directory.relative_to(self.root).as_posix()] = directory
+        return {source: directory for source, directory in sources.items()
+                if (directory / "hermes/state.db").resolve().is_relative_to(self.root)}
 
     def business_snapshot(self, instances, incident_rows):
         from environment import get_request_logs, read_changes
@@ -976,6 +1057,8 @@ class Workbench:
             if state is None:
                 raise ValueError("Unknown session source")
             database = state / "hermes/state.db"
+            if not database.resolve().is_relative_to(self.root):
+                raise ValueError("Session database is outside this workbench")
             with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
                 db.row_factory = sqlite3.Row
                 metadata = db.execute("SELECT id, parent_session_id, started_at, model FROM sessions WHERE id=?",
@@ -1037,7 +1120,8 @@ class Workbench:
             errors = []
             for source, state in sources.items():
                 try:
-                    incident_rows.extend(self.incident_snapshot(source, state))
+                    if not source.startswith("evolution:"):
+                        incident_rows.extend(self.incident_snapshot(source, state))
                     sessions.extend(self.session_summaries(source, state))
                 except (OSError, ValueError, KeyError, sqlite3.Error) as exc:
                     errors.append({"source": source, "error": str(exc)})
@@ -1071,6 +1155,7 @@ class Workbench:
                     "incidents": sorted(incident_rows, key=lambda row: row["observed_at"], reverse=True),
                     "sessions": sorted(sessions, key=lambda row: row["started_at"], reverse=True),
                     "learning": self.learning_snapshot(), "memory": self.memory_snapshot(),
+                    "evolution": self.evolution_snapshot(),
                     "questions": self.question_snapshots(), "checks": checks,
                     "events": list(reversed(self.record["events"])), "errors": errors}
 
@@ -1127,7 +1212,7 @@ def make_server(workbench, host, port, html_path):
                 body = json.loads(self.rfile.read(size))
                 if not isinstance(body, dict):
                     raise ValueError("Use a JSON object")
-                if body.get("action") == "recovery_approve":
+                if body.get("action") in ("recovery_approve", "rollback_approve"):
                     self.send(200, workbench.action(body, request_context={"transport": "http", "origin": origin,
                                                                          "host": self.headers.get("Host")}))
                 else:

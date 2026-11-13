@@ -20,7 +20,7 @@ from environment import SERVICES, load_json, write_json
 from fleet import GROUP, SEED, receipt, sha256
 from hermes_runtime import ONCALL_SKILL, ensure_loopback_no_proxy
 from implementation import load_implementation
-from patrol import connect, incidents, model_connection
+from patrol import connect, incidents, model_connection, writer_lock
 from skillclaw_bridge import _bound_port, incident_archive
 
 ALIASES = ("instance-a", "instance-b")
@@ -251,80 +251,104 @@ def select_batch(root, state, completed):
     return selected if set(selected) == set(ALIASES) else None
 
 
-def learn(root, live, implementation=None):
+def learn_once(root, live, module, options):
+    """Serialize publication decisions and reload state committed by operator jobs."""
     from fleet_eval import evaluate
     from skillclaw_evolve import evolve
+    from engineering_analysis import build_analysis
 
-    module = load_implementation(implementation or HERE / "self_improvement_agent.py")
     status_path = root / "learning" / "state.json"
-    state = load_json(status_path)
-    recover_publication(root, state)
+    with writer_lock(root / "learning", "governance.sqlite", timeout=1):
+        state = load_json(status_path)
+        state["governance_version"] = "sqlite-v1"
+        try:
+            recover_publication(root, state)
+            completed = completed_incidents(root)
+            check_adoption(root, state, completed)
+            awaiting = (state.get("last_release", {}).get("status") == "awaiting_adoption"
+                        or state.get("operator_rollback", {}).get("status") == "awaiting_verification")
+            batch = None if awaiting else select_batch(root, state, completed)
+            if batch:
+                sessions = sorted(entry["session_id"] for entry in batch.values())
+                key = hashlib.sha256("\n".join(sessions).encode()).hexdigest()[:16]
+                attempt = state["attempts"].get(key, 0) + 1
+                state["attempts"][key] = attempt
+                work = root / "learning" / "batches" / key / f"attempt-{attempt}"
+                work.mkdir(parents=True)
+                state.update(status="evaluating", batch=key, attempt=attempt)
+                write_json(status_path, state)
+                baseline = root / "formal" / "versions" / state["active_sha256"] / ONCALL_SKILL / "SKILL.md"
+                result = {"sources": batch, "baseline_sha256": state["active_sha256"], "status": "keep"}
+                try:
+                    records = {(entry["instance"], entry["record"]["session_id"]): entry["record"]
+                               for entry in completed}
+                    analysis_sources = []
+                    for alias, entry in batch.items():
+                        record = records[alias, entry["session_id"]]
+                        worker = root / "patrols" / alias
+                        analysis_sources.append({"instance": alias, "worker": worker, "record": record,
+                                                 "branch_path": worker / "pages" / record["incident_id"] / "investigation.json"})
+                    analysis = build_analysis(work, analysis_sources)
+                    result["engineering_analysis"] = analysis
+                    candidate, evolution = evolve(work / "staging", baseline,
+                                                  [Path(entry["archive"]) for entry in batch.values()],
+                                                  options if live else None, engineering_analysis=analysis)
+                    result["evolution"] = evolution
+                    if candidate is not None:
+                        evaluation = evaluate(work / "evaluation", baseline, candidate, options,
+                                              release_policy=module.release_policy)
+                        result["evaluation"] = evaluation
+                        if evaluation["passed"]:
+                            digest = evaluation["candidate_sha256"]
+                            try:
+                                result["release"] = publish(root, candidate, digest, state=state)
+                            except Exception:
+                                # A partial delivery must restore both the formal pointer and receivers.
+                                result["rollback"] = recover_publication(root, state)
+                                raise
+                            committed = {
+                                **state, "active_sha256": digest,
+                                "processed_sessions": [*state["processed_sessions"], *sessions],
+                                "last_release": {"sha256": digest, "previous_sha256": state["active_sha256"],
+                                                 "published_at": time.time(), "status": "awaiting_adoption",
+                                                 "adoptions": {}},
+                            }
+                            committed.pop("pending_release")
+                            write_json(status_path, committed)
+                            state = committed
+                            result["status"] = "published"
+                        else:
+                            result["status"] = "rejected"
+                    state["processed_sessions"] = sorted(set(state["processed_sessions"]).union(sessions))
+                except Exception as exc:
+                    result.update(status="failed", error=str(exc))
+                    if attempt >= 3:
+                        state["processed_sessions"].extend(sessions)
+                        result["retry_exhausted"] = True
+                write_json(work / "result.json", result)
+                state["last_batch"] = {"path": str(work), "status": result["status"]}
+            state.update(status="waiting", updated_at=time.time())
+            write_json(status_path, state)
+        except Exception as exc:
+            state.update(status="error", error=str(exc), updated_at=time.time())
+            write_json(status_path, state)
+            if state.get("pending_release") is not None:
+                raise
+
+
+def learn(root, live, implementation=None):
+    module = load_implementation(implementation or HERE / "self_improvement_agent.py")
     with model_connection(not live) as url:
         options = {"base_url": url, "api_key": os.environ["GLM_API_KEY"] if live else "local-fixture",
                    "model": os.environ.get("GLM_MODEL", "glm-5.2") if live else "patrol-fixture"}
         while True:
             try:
-                recover_publication(root, state)
-                completed = completed_incidents(root)
-                check_adoption(root, state, completed)
-                awaiting = state.get("last_release", {}).get("status") == "awaiting_adoption"
-                batch = None if awaiting else select_batch(root, state, completed)
-                if batch:
-                    sessions = sorted(entry["session_id"] for entry in batch.values())
-                    key = hashlib.sha256("\n".join(sessions).encode()).hexdigest()[:16]
-                    attempt = state["attempts"].get(key, 0) + 1
-                    state["attempts"][key] = attempt
-                    work = root / "learning" / "batches" / key / f"attempt-{attempt}"
-                    work.mkdir(parents=True)
-                    state.update(status="evaluating", batch=key, attempt=attempt)
-                    write_json(status_path, state)
-                    baseline = root / "formal" / "versions" / state["active_sha256"] / ONCALL_SKILL / "SKILL.md"
-                    result = {"sources": batch, "baseline_sha256": state["active_sha256"], "status": "keep"}
-                    try:
-                        candidate, evolution = evolve(work / "staging", baseline,
-                                                      [Path(entry["archive"]) for entry in batch.values()],
-                                                      options if live else None)
-                        result["evolution"] = evolution
-                        if candidate is not None:
-                            evaluation = evaluate(work / "evaluation", baseline, candidate, options,
-                                                  release_policy=module.release_policy)
-                            result["evaluation"] = evaluation
-                            if evaluation["passed"]:
-                                digest = evaluation["candidate_sha256"]
-                                try:
-                                    result["release"] = publish(root, candidate, digest, state=state)
-                                except Exception:
-                                    # A partial delivery must restore both the formal pointer and receivers.
-                                    result["rollback"] = recover_publication(root, state)
-                                    raise
-                                committed = {
-                                    **state, "active_sha256": digest,
-                                    "processed_sessions": [*state["processed_sessions"], *sessions],
-                                    "last_release": {"sha256": digest, "previous_sha256": state["active_sha256"],
-                                                     "published_at": time.time(), "status": "awaiting_adoption",
-                                                     "adoptions": {}},
-                                }
-                                committed.pop("pending_release")
-                                write_json(status_path, committed)
-                                state = committed
-                                result["status"] = "published"
-                            else:
-                                result["status"] = "rejected"
-                        state["processed_sessions"] = sorted(set(state["processed_sessions"]).union(sessions))
-                    except Exception as exc:
-                        result.update(status="failed", error=str(exc))
-                        if attempt >= 3:
-                            state["processed_sessions"].extend(sessions)
-                            result["retry_exhausted"] = True
-                    write_json(work / "result.json", result)
-                    state["last_batch"] = {"path": str(work), "status": result["status"]}
-                state.update(status="waiting", updated_at=time.time())
-                write_json(status_path, state)
-            except Exception as exc:
-                state.update(status="error", error=str(exc), updated_at=time.time())
-                write_json(status_path, state)
-                if state.get("pending_release") is not None:
+                learn_once(root, live, module, options)
+            except RuntimeError as exc:
+                if str(exc) != "This state is already in use by a patrol runtime command":
                     raise
+                # Operator publication owns the same transaction. Keep workers
+                # running and retry with freshly loaded state after it releases.
             time.sleep(2)
 
 

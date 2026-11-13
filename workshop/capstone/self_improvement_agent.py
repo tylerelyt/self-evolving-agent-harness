@@ -150,8 +150,18 @@ def run_once(runtime, index, faults):
 
 
 def learn(runtime, task):
+    from engineering_analysis import build_analysis
+
     runtime.step(f"Round {task.number}: evolve from the two completed sessions")
-    candidate, evolution = evolve(task.iteration / "staging", runtime.baseline, task.sources, runtime.options if runtime.live else None)
+    proofs = load_json(task.iteration / "collection" / "patrol-evidence.json")
+    analysis = build_analysis(task.iteration, [
+        {"instance": alias, "worker": runtime.workers[alias][0], "record": proof["incident"],
+         "branch_path": task.iteration / "collection" / alias / "investigation.json"}
+        for alias, proof in proofs.items()
+    ])
+    task.result["engineering_analysis"] = analysis
+    candidate, evolution = evolve(task.iteration / "staging", runtime.baseline, task.sources,
+                                  runtime.options if runtime.live else None, engineering_analysis=analysis)
     task.result["evolution"] = evolution
     task.result["decision"] = "keep"
     if candidate is not None and sha256(candidate) != task.before:
