@@ -4,17 +4,17 @@
 
 每讲从自己的 `materials/` 创建独立运行目录，可以单独开始。第 06、07 讲需要的历史调查、第 08 讲使用的 Skill，以及第 09 讲的 Hotfix 代码都已随讲提供。练习之间通过业务场景衔接，运行时不依赖上一讲留下的 Session 或产物。
 
-| 讲次 | 练习入口 | Notebook 直接展示的接口 | 核对的机制 |
-| --- | --- | --- | --- |
-| 01 | [Agent Loop](01-agent-loop/README.md) | `thread_start()`、`turn()`、`run()` | 模型自主读取材料，工具结果进入后续调用，最终形成调查报告 |
-| 02 | [运行时控制](02-instruction-control/README.md) | `thread_start()`、`turn()`、`steer()`、`interrupt()` | 在运行中投递新要求，核对转向、中断终态与已落地文件 |
-| 03 | [上下文引擎](03-context-engine/README.md) | `thread_start(developer_instructions=...)`、`turn()`、`run()` | 规则与工具进入请求，文件内容经成功回执进入后续调用 |
-| 04 | [AGENTS.md](04-agents-md/README.md) | `thread_start(cwd=...)`、不同会话的实际输入 | 根到当前目录的规则装配，以及新任务的规则范围 |
-| 05 | [上下文压缩](05-context-compression/README.md) | `compact()`、`read(include_turns=True)`、完成状态检查 | 原生压缩事件、输入缩短与任务判断状态保留 |
-| 06 | [会话分支](06-thread-fork/README.md) | `CodexClient.thread_fork()`、`lastTurnId`、分支历史读取 | 指定 Turn 为包含边界，保留模块背景，排除后续旧结论 |
-| 07 | [经验技能化](07-skill-extraction/README.md) | `SkillInput`、`TextInput`、`--resources`、独立 Thread | 审阅本轮实际生成的方法，再在新任务中试用同一版本 |
-| 08 | [渐进披露](08-progressive-disclosure/README.md) | 普通任务文本、独立 Thread、`turn()/run()` 与请求记录 | 对比无关任务与匹配任务，观察自然选用及正文、附件的读取时机 |
-| 09 | [隔离与审批](09-isolation-approval/README.md) | `turn_start(..., params)` 中的 `sandboxPolicy`、`approval_handler` | 学员确认本轮计划与权限配置以后执行，再观察越界拒绝与一次性审批 |
+| 讲次 | 关键词 | 练习入口 | Notebook 直接展示的接口 | 核对的机制 |
+| --- | --- | --- | --- | --- |
+| 01 | 执行 | [Agent Loop](01-agent-loop/README.md) | `thread_start()`、`turn()`、`run()` | 模型自主读取材料，工具结果进入后续调用，最终形成调查报告 |
+| 02 | 控制 | [运行时控制](02-instruction-control/README.md) | `thread_start()`、`turn()`、`steer()`、`interrupt()` | 在运行中投递新要求，核对转向、中断终态与已落地文件 |
+| 03 | 上下文 | [上下文引擎](03-context-engine/README.md) | `thread_start(developer_instructions=...)`、`turn()`、`run()` | 规则与工具进入请求，文件内容经成功回执进入后续调用 |
+| 04 | 规则 | [AGENTS.md](04-agents-md/README.md) | `thread_start(cwd=...)`、不同会话的实际输入 | 根到当前目录的规则装配，以及新任务的规则范围 |
+| 05 | 压缩 | [上下文压缩](05-context-compression/README.md) | `compact()`、`read(include_turns=True)`、完成状态检查 | 原生压缩事件、输入缩短与任务判断状态保留 |
+| 06 | 分支 | [会话分支](06-thread-fork/README.md) | `CodexClient.thread_fork()`、`lastTurnId`、分支历史读取 | 指定 Turn 为包含边界，保留模块背景，排除后续旧结论 |
+| 07 | 提炼 | [经验技能化](07-skill-extraction/README.md) | `SkillInput`、`TextInput`、`--resources`、独立 Thread | 审阅本轮实际生成的方法，再在新任务中试用同一版本 |
+| 08 | 披露 | [渐进披露](08-progressive-disclosure/README.md) | 普通任务文本、独立 Thread、`turn()/run()` 与请求记录 | 对比无关任务与匹配任务，观察自然选用及正文、附件的读取时机 |
+| 09 | 授权 | [隔离与审批](09-isolation-approval/README.md) | `turn_start(..., params)` 中的 `sandboxPolicy`、`approval_handler` | 学员确认本轮计划与权限配置以后执行，再观察越界拒绝与一次性审批 |
 
 ## 前置条件与运行
 
