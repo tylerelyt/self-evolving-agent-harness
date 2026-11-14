@@ -3,7 +3,7 @@
 import argparse
 from contextlib import contextmanager
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import math
 import os
@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
 from .paths import prepare
+prepare()
+from self_evolving_harness.http_server import LoopbackHTTPServer
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -107,7 +109,7 @@ def budget_proxy(endpoint, key, model, record, *, max_requests=160, max_seconds=
                     save()
                 self.reply(502, b'{"error":{"message":"Acceptance transport failed"}}')
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LoopbackHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

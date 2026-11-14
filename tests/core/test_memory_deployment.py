@@ -9,12 +9,17 @@ launcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(launcher)
 SERVER='''import argparse,json,os,signal,threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,HTTPServer
+from socketserver import TCPServer
+class NumericHTTPServer(HTTPServer):
+ def server_bind(self):
+  TCPServer.server_bind(self)
+  self.server_name,self.server_port=self.server_address[:2]
 p=argparse.ArgumentParser();p.add_argument('--state');p.add_argument('--port',type=int);a=p.parse_args();state=Path(a.state)
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def do_GET(self):
   self.send_response(200);self.end_headers();self.wfile.write(b'{"status":"ok"}')
-server=HTTPServer(('127.0.0.1',a.port),Handler)
+server=NumericHTTPServer(('127.0.0.1',a.port),Handler)
 record=state/'server.json';record.write_text(json.dumps({'pid':os.getpid(),'ppid':os.getppid(),'pgrp':os.getpgrp(),'status':'ready','endpoint':f'http://127.0.0.1:{a.port}'}))
 (state/'retained-evidence').touch(exist_ok=True)
 def stop(*args):threading.Thread(target=server.shutdown).start()

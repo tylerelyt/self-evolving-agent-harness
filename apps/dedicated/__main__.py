@@ -2,7 +2,7 @@
 
 import argparse
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 from self_evolving_harness.authority import ActionJournal, ApprovalAuthority, Principal
+from self_evolving_harness.http_server import LoopbackHTTPServer
 
 
 class ToolGateway:
@@ -105,7 +106,7 @@ def make_server(gateway, port=0):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return LoopbackHTTPServer(("127.0.0.1", port), Handler)
 
 
 def main():

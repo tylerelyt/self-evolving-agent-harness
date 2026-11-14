@@ -6,12 +6,16 @@ semantic ranking quality must be evaluated separately with a production encoder.
 """
 import argparse
 from hashlib import blake2b
-from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json,math,os
 from pathlib import Path
 import shlex,signal,sys,threading,time,hmac,secrets
 from urllib.request import Request,build_opener,ProxyHandler,HTTPRedirectHandler
 from urllib.error import HTTPError
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'src'))
+from self_evolving_harness.http_server import LoopbackHTTPServer
 
 
 def encode(text,dimension=512):
@@ -93,7 +97,7 @@ def main():
             except Exception as error:
                 with mutex:row.update(status='transport_error',error_type=type(error).__name__);write(ledger_path,ledger)
                 self.send(502,b'{"error":{"message":"Indexing transport failed"}}')
-    gateway=ThreadingHTTPServer(('127.0.0.1',0),Handler);gateway.daemon_threads=True
+    gateway=LoopbackHTTPServer(('127.0.0.1',0),Handler);gateway.daemon_threads=True
     thread=threading.Thread(target=gateway.serve_forever,daemon=True);thread.start()
     config={'server':{'host':'127.0.0.1','port':args.port},'storage':{'workspace':str(state/'data'),'vectordb':{'backend':'local'},'agfs':{'backend':'local'}},
             'vlm':{'provider':'openai','model':model,'api_base':f'http://127.0.0.1:{gateway.server_port}/v1','api_key':local_token,'max_tokens':2048,'max_concurrent':1},

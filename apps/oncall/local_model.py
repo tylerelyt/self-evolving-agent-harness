@@ -1,10 +1,17 @@
 """本机脚本模型。通过真实 HTTP 和 Hermes 工具循环验证固定故障场景。"""
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import re
+import sys
+from pathlib import Path
 from threading import Thread
 from uuid import uuid4
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(ROOT / "src"))
+from self_evolving_harness.http_server import LoopbackHTTPServer
 
 
 EXPAND = '同一故障包含多项告警时，使用 all 查询目标集群的 alerts 与 traces，补全受影响服务。'
@@ -108,7 +115,7 @@ def serve(respond=decide):
             except (KeyError, TypeError, ValueError, AttributeError) as exc:
                 self.send_error(400, type(exc).__name__)
 
-    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+    with LoopbackHTTPServer(('127.0.0.1', 0), Handler) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
