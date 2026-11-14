@@ -6,7 +6,7 @@
 
 | 范围 | 运行环境 | 准备说明 |
 | --- | --- | --- |
-| 第 01—09 讲 | Codex SDK、Notebook、本地模型适配器 | [Notebook 依赖与运行方式](examples/README.md#前置条件与运行) |
+| 第 01—09 讲 | Codex SDK、Notebook、本地模型适配器 | [Notebook 依赖与运行方式](examples/CODEX.md#前置条件与运行) |
 | 第 10—18 讲 | Hermes | 各讲 README；通用依赖由 `bash scripts/setup_deps.sh` 安装 |
 | 第 19—20 讲 | Hermes、数据集与评测工具；第20讲使用 GEPA | 各讲分别准备题包、运行环境和验收目录 |
 | 第 21—22 讲 | Hermes、SkillClaw | 先运行 `bash scripts/setup_deps.sh` 和 `bash scripts/setup_skillclaw.sh`，再按本讲说明运行 |
