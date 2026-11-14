@@ -489,7 +489,8 @@ def learn(root, live, implementation=None):
             time.sleep(2)
 
 
-def _serve_owned(root, live, implementation, *, environment_states=None, oncall=True, learning=True, resume=False):
+def _serve_owned(root, live, implementation, *, environment_states=None, oncall=True, learning=True, resume=False,
+                 memory_config=None, enable_memory=False):
     ensure_loopback_no_proxy()
     root = Path(root).resolve()
     implementation = Path(implementation).resolve()
@@ -512,6 +513,9 @@ def _serve_owned(root, live, implementation, *, environment_states=None, oncall=
                "patrol_config": patrol_config, "oncall_enabled": oncall,
                "learning_enabled": learning_enabled, "environment_ownership": "external" if attached else "service",
                "environments": {alias: str(path) for alias,path in environment_states.items()}}
+    if memory_config is not None:
+        memory_config = Path(memory_config).resolve()
+        binding["memory_configuration"] = {"path": str(memory_config), "sha256": sha256(memory_config)}
     binding_path = root / "service-binding.json"
     existing = binding_path.is_file()
     if existing:
@@ -519,7 +523,16 @@ def _serve_owned(root, live, implementation, *, environment_states=None, oncall=
             raise FileExistsError("Existing service state requires --resume")
         saved = load_json(binding_path)
         if saved["configuration"] != binding:
-            raise ValueError("Cannot resume with different mode, implementation or environment bindings")
+            previous = saved["configuration"]
+            without_memory = {key: value for key, value in binding.items() if key != "memory_configuration"}
+            if (enable_memory and memory_config is not None and "memory_configuration" not in previous
+                    and previous == without_memory):
+                saved.setdefault("migrations", []).append({"kind": "enable-openviking-memory",
+                    "at": time.time(), "previous_configuration": previous, "configuration": binding})
+                saved["configuration"] = binding
+                write_json(binding_path, saved)
+            else:
+                raise ValueError("Cannot resume with different mode, implementation or environment bindings")
     elif any(root.iterdir()) and (root / "service.json").exists():
         raise ValueError("Existing service state has no verified binding; migrate explicitly")
     else:
@@ -580,6 +593,20 @@ def _serve_owned(root, live, implementation, *, environment_states=None, oncall=
                     raise ValueError("HTTP environment scope changed across restart")
                 saved["environment_ids"][alias] = identity
                 write_json(binding_path,saved)
+            memory_binding = None
+            if memory_config is not None:
+                from apps.oncall.memory import bind_configuration
+                memory_binding = bind_configuration(memory_config, root, saved["environment_ids"])
+                previous = os.environ.get("ONCALL_MEMORY_CONFIG")
+                os.environ["ONCALL_MEMORY_CONFIG"] = str(memory_binding)
+                def restore_memory_environment():
+                    if previous is None:
+                        os.environ.pop("ONCALL_MEMORY_CONFIG", None)
+                    else:
+                        os.environ["ONCALL_MEMORY_CONFIG"] = previous
+                stack.callback(restore_memory_environment)
+            for alias in ALIASES:
+                environment = environment_states[alias]
                 receiver = root / "receivers" / alias
                 proxy = stack.enter_context(client_proxy(root / "archives", alias, receiver, options,
                                                          offline=not live))
@@ -597,16 +624,26 @@ def _serve_owned(root, live, implementation, *, environment_states=None, oncall=
                 if not live:
                     command.append("--offline")
                 workers[alias] = start_process(stack, command, worker / "patrol.log")
+            memory_command = [sys.executable, "-B", str(Path(__file__).resolve()), "--out", str(root),
+                              "--memory-worker", "--memory-config", str(memory_binding)]
+            if live:
+                memory_command.append("--live")
+            memory_worker = (start_process(stack, memory_command, root / "system" / "memory-worker.log")
+                             if memory_binding else None)
             command = [sys.executable, "-B", str(Path(__file__).resolve()), "--out", str(root), "--learn-worker",
                        "--implementation", str(implementation)]
             if live:
                 command.append("--live")
             learner = start_process(stack, command, root / "learning" / "worker.log") if learning_enabled else None
             status.update(status="running", workers={alias: process.pid for alias, process in workers.items()},
-                          learner_pid=learner.pid if learner is not None else None)
+                          learner_pid=learner.pid if learner is not None else None,
+                          memory_backend="openviking" if memory_binding else "disabled",
+                          memory_binding=str(memory_binding) if memory_binding else None,
+                          memory_worker_pid=memory_worker.pid if memory_worker else None)
             write_json(status_path, status)
             print(f"On-call service running. State: {root}", flush=True)
             restarts = 0
+            memory_restarts = 0
             while True:
                 for alias, process in {**environments, **{f"{alias}-patrol": child for alias, child in workers.items()}}.items():
                     if process.poll() is not None:
@@ -615,6 +652,14 @@ def _serve_owned(root, live, implementation, *, environment_states=None, oncall=
                     restarts += 1
                     learner = start_process(stack, command, root / "learning" / "worker.log")
                     status.update(learner_pid=learner.pid, learner_restarts=restarts)
+                if memory_worker is not None and memory_worker.poll() is not None and memory_restarts < 3:
+                    memory_restarts += 1
+                    memory_worker = start_process(stack, memory_command, root / "system" / "memory-worker.log")
+                    status.update(memory_worker_pid=memory_worker.pid, memory_worker_restarts=memory_restarts)
+                status["memory_available"] = memory_worker is not None and memory_worker.poll() is None
+                if memory_binding:
+                    memory_status = Path(load_json(memory_binding)["state_dir"]) / "status.json"
+                    status["memory"] = load_json(memory_status) if memory_status.is_file() else {"status": "starting"}
                 status.update(learning_available=learner is not None and learner.poll() is None, updated_at=time.time())
                 write_json(status_path, status)
                 time.sleep(1)
@@ -642,12 +687,14 @@ def service_owner(root):
             fcntl.flock(owner,fcntl.LOCK_UN)
 
 
-def serve(root,live,implementation,*,environment_states=None,oncall=True,learning=True,resume=False):
+def serve(root,live,implementation,*,environment_states=None,oncall=True,learning=True,resume=False,
+          memory_config=None,enable_memory=False):
     root = Path(root).resolve()
     root.mkdir(parents=True,exist_ok=resume)
     with service_owner(root):
         return _serve_owned(root,live,implementation,environment_states=environment_states,
-                            oncall=oncall,learning=learning,resume=resume)
+                            oncall=oncall,learning=learning,resume=resume,memory_config=memory_config,
+                            enable_memory=enable_memory)
 
 
 def main(argv=None):
@@ -661,18 +708,31 @@ def main(argv=None):
     parser.add_argument("--patrol-only", action="store_true", help="Run scheduled inspections before enabling On-call handling")
     parser.add_argument("--no-learning", action="store_true", help="Run On-call workers without the background learner")
     parser.add_argument("--learn-worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--memory-worker", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--memory-config", type=Path, help="OpenViking deployment memory configuration")
+    parser.add_argument("--enable-memory", action="store_true",
+                        help="Explicitly add memory to an otherwise unchanged existing service binding")
     args = parser.parse_args(argv)
     ensure_loopback_no_proxy()
     if (args.environment_a is None) != (args.environment_b is None):
         parser.error("--environment-a and --environment-b must be provided together")
-    if args.learn_worker:
+    if args.memory_worker:
+        if not args.memory_config:
+            parser.error("Memory worker requires its actual bound configuration")
+        from apps.oncall.memory import main as run_memory
+        command = ["--root", str(args.out.resolve()), "--config", str(args.memory_config.resolve())]
+        if args.live:
+            command.append("--live")
+        run_memory(command)
+    elif args.learn_worker:
         learn(args.out.resolve(), args.live, args.implementation.resolve())
     else:
         environments = None if args.environment_a is None else {
             "instance-a": args.environment_a, "instance-b": args.environment_b,
         }
         serve(args.out.resolve(), args.live, args.implementation.resolve(), environment_states=environments,
-              oncall=not args.patrol_only, learning=not args.no_learning, resume=args.resume)
+              oncall=not args.patrol_only, learning=not args.no_learning, resume=args.resume,
+              memory_config=args.memory_config, enable_memory=args.enable_memory)
 
 
 if __name__ == "__main__":

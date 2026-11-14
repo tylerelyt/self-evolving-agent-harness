@@ -1,14 +1,15 @@
 # Self-Evolving Agent Harness
 
-面向持续工作与经验学习的自进化 Harness 工程项目，以 On-call 系统为首个完整场景：持续巡检，处理外部告警，保存执行证据，从经历中改进 Memory／Skill，经独立评测后发布，并在后续任务中验证实际采用。
+面向持续工作与经验学习的自进化 Harness 工程项目，以 On-call 系统为首个完整场景：持续巡检，处理外部告警，保存执行证据，从经历中核验历史事实、改进 Memory／Skill，将带来源的记忆写入 OpenViking，方法经独立评测后发布，并在后续任务中验证实际采用。
 
-部署面向日常个人 Harness 和专用 Harness：个人使用有独立运行空间，企业适配器可以接入自己的上下文、工具、权限与评测；tutorial 是这套系统的教学入口。
+提供个人与专用部署配置：个人 Harness 使用独立运行空间，企业适配器接入组织的上下文、工具、权限与评测。
 
-系统按独立的架构、接口和版本持续迭代；tutorial 教授它的稳定版本。运行代码、工作台、工具和集成适配位于 `apps/`，共享核心位于 `src/self_evolving_harness`，课程保留独立练习和兼容入口。
+`apps/` 提供运行服务、工作台和集成适配，`src/self_evolving_harness` 提供共享核心，`deploy/` 提供部署工具，`examples/` 与 `workshop/` 提供练习入口。
 
 - [系统架构与设计](docs/architecture/README.md)
 - [部署个人与专用 Harness](deploy/README.md)
 - [运行持续 On-call 系统](apps/oncall/README.md)
+- [部署 OpenViking 持续记忆](deploy/OPENVIKING.md)
 - [个人 Skill 的评测、发布与采用](deploy/PERSONAL-LEARNING.md)
 - [接入专用工具与恢复权限](apps/oncall/ENTERPRISE.md)
 - [长期迭代路线与验收边界](docs/architecture/ROADMAP.md)
@@ -17,7 +18,7 @@
 
 ![长期运行的 Harness RSI 系统目标架构](assets/images/maintained-rsi-system.png)
 
-目标架构总览：个人与企业部署共用 RSI 核心，tutorial 独立教学；底部单列深层演化扩展，实际实现边界见图注。
+目标架构总览：个人与专用部署共用 RSI 核心；已实现能力与后续扩展见[实现说明](docs/architecture/IMPLEMENTATION.md)。
 
 本 repo 同时提供极客时间专栏[《自进化 Agent 实战》](https://time.geekbang.org/column/intro/101188801)的教学代码，各讲仍有独立的练习目录、运行说明和验收记录。
 
@@ -30,11 +31,14 @@
 ```bash
 bash scripts/setup_deps.sh
 bash scripts/setup_skillclaw.sh
+.deps/hermes-agent/.venv/bin/python deploy/setup_openviking.py
 .deps/hermes-agent/.venv/bin/python deploy/manage.py launch \
   --profile deploy/profiles/dedicated-oncall.json
 ```
 
-默认以脚本模型启动持续服务；重启沿用同一状态目录、会话与批准版本。个人 Harness、真实模型、工作台及专用权限网关的配置见上方各入口；教程的受控两轮演练单独运行。
+默认专用部署以脚本模型巡检，并托管真实 OpenViking 0.4.12：事故关闭后，独立记忆 worker 自动复盘、写入事实和 runbook，后续巡检与调查按需检索，工作台展示记忆状态与来源；重启保留状态、会话和批准版本。
+
+记忆索引摘要仍真实调用 DeepSeek，启动前需在私有配置中提供模型连接；默认累计预算为 60 次，重启不清零，本地字符 n-gram 编码只用于词面检索接线，不代表语义召回质量已获验收，详见 [OpenViking 部署与边界](deploy/OPENVIKING.md)。个人 Harness、外部记忆端点和专用权限网关使用各自部署配置；受控两轮演练见[综合实战](workshop/capstone/README.md)。
 
 ## 逐讲练习
 

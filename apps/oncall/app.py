@@ -29,6 +29,7 @@ def main():
     mode.add_argument("--offline", dest="live", action="store_false", help="Explicitly use a scripted wiring demonstration")
     parser.set_defaults(live=True)
     parser.add_argument("--env-file", type=Path, help="Read GLM settings from this local file instead of the repo .env")
+    parser.add_argument("--memory-config", type=Path, help="Bind the continuous service to operator-configured OpenViking")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--solution", action="store_true", help="Open the complete reference implementation")
     selection.add_argument("--implementation", type=Path, help="Use this implementation in the workbench and checks")
@@ -42,7 +43,7 @@ def main():
     state = args.state
     if args.new_state:
         state = state.with_name(state.name + "-" + uuid4().hex[:12])
-    with Workbench(state, implementation, live=args.live, mode=args.mode) as workbench:
+    with Workbench(state, implementation, live=args.live, mode=args.mode, memory_config=args.memory_config) as workbench:
         server = make_server(workbench, "127.0.0.1", args.port, HERE / "web" / "index.html")
         def stop(_signal, _frame):
             threading.Thread(target=server.shutdown, daemon=True).start()

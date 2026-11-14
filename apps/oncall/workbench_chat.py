@@ -239,7 +239,31 @@ def tool_spec(name, description, handler, properties=None, required=()):
         "handler": handler}
 
 
-def simple_tools(root, context, stage=0, run=None, pinned_book=None):
+def knowledge_context(root, context, session_id):
+    from apps.oncall.knowledge_tools import lookup
+    from environment import get_snapshot, SERVICES
+
+    aliases = [context["instance"]] if context.get("instance") in ALIASES else list(ALIASES)
+    services = [context["service"]] if context.get("service") in SERVICES else list(SERVICES)
+    results = []
+    for alias in aliases:
+        for service in services:
+            try:
+                observation = get_snapshot(root / "environments" / alias, service)
+                value = lookup(root=root, receiver=alias, service=service,
+                               environment_id=observation["environment_id"], session_id=session_id)
+            except (OSError, RuntimeError, ValueError, KeyError) as error:
+                value = {"backend": "openviking", "historical_only": True, "success": False,
+                         "error": "Current environment identity unavailable", "error_type": type(error).__name__}
+            results.append({"instance": alias, "service": service, "knowledge": value})
+    failed = any(item["knowledge"].get("success") is not True for item in results)
+    result = {"backend": "openviking", "historical_only": True, "scopes": results, "success": not failed}
+    if failed:
+        result["error"] = "Knowledge unavailable in one or more assigned scopes"
+    return result
+
+
+def simple_tools(root, context, stage=0, run=None, pinned_book=None, *, session_id=None):
     if type(stage) is not int or not 1 <= stage <= 4:
         return {}
     tools = {
@@ -255,6 +279,11 @@ def simple_tools(root, context, stage=0, run=None, pinned_book=None):
         tools.pop("memory_lookup")
     if stage < 4:
         tools.pop("skill_history")
+    if stage >= 3 and os.environ.get("ONCALL_MEMORY_CONFIG", "").strip():
+        tools.pop("memory_lookup", None)
+        tools["knowledge_lookup"] = tool_spec("knowledge_lookup",
+            "Retrieve OpenViking historical facts/runbooks only in the selected instance/service scope. Citations are historical; fresh HTTP evidence determines current health.",
+            lambda: knowledge_context(root, context, session_id))
     return tools
 
 
@@ -320,6 +349,8 @@ def offline_reply(messages):
     investigator = task.get("investigator")
     sequence = (["service_metrics", "request_logs", "recent_changes", "incident_history"]
                 if investigator else ["investigate_instances"] if task.get("stage", 0) >= 2 else ["service_metrics"])
+    if task.get("knowledge_enabled") and task.get("stage", 0) >= 3:
+        sequence.append("knowledge_lookup")
     for name in sequence:
         if name not in receipts:
             return name, {"instances": list(ALIASES), "task": task.get("question", "检查现场")} if name == "investigate_instances" else {}
@@ -466,7 +497,7 @@ def ask(state, root, question, context=None, *, offline=False, investigator=None
                 write_json(state / "conversation.json", meta)
                 if sessions.get_session(meta["session_id"]) is None:
                     sessions.create_session(meta["session_id"], "cli", model=options["model"], system_prompt=POLICY)
-                tools = simple_tools(root, context, stage, run, meta["runbook"])
+                tools = simple_tools(root, context, stage, run, meta["runbook"], session_id=meta["session_id"])
                 if not investigator and stage >= 2:
                     def dispatch_investigation(instances, task):
                         return investigate(root, state, instances, task, context, offline)
@@ -475,6 +506,8 @@ def ask(state, root, question, context=None, *, offline=False, investigator=None
                         dispatch_investigation, {"instances": {"type": "array", "items": {"type": "string", "enum": list(ALIASES)}, "minItems": 1, "maxItems": 2},
                                                  "task": {"type": "string"}}, ("instances", "task"))
                 task = {"question": question, "context": context, "investigator": investigator, "stage": stage}
+                if "knowledge_lookup" in tools:
+                    task["knowledge_enabled"] = True
                 prompt = PREFIX + json.dumps(task, ensure_ascii=False) + "\n" + POLICY
                 if investigator:
                     prompt += "\n你是分派给 " + investigator + " 的调查员。先读取当前指标、请求日志和配置变更，再按需查历史。默认用约200个中文字给出调查结论、关键数值、时间窗口与实例/服务范围，只标记影响本题判断的未知原因。无需逐项列出正常服务，不附能力外检查清单；用户明确要求详细时再展开。不要再次分派。"

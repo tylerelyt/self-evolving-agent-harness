@@ -28,6 +28,70 @@ from shared_facts import FACT_FIELDS, read_fact, validate_fact
 ALIASES = ("instance-a", "instance-b")
 
 
+def openviking_state(binding):
+    """Read-only administration view; model retrieval still calls OpenViking."""
+    from self_evolving_harness.knowledge import KnowledgeStore
+
+    config = load_json(Path(binding))
+    if config.get("backend") != "openviking" or not config.get("instances"):
+        raise ValueError("Expected a bound OpenViking service configuration")
+    directory = Path(config["state_dir"])
+    path = directory / "status.json"
+    status = load_json(path) if path.is_file() else {"status": "starting"}
+    result = {**status, "backend": "openviking", "namespace": config["namespace"], "facts": [],
+              "runbooks": [], "recalls": [], "reviews": [], "automatic_review": True,
+              "pending_publications": 0, "view": "publication-metadata-not-retrieval"}
+    database = directory / "knowledge.sqlite3"
+    if not database.is_file():
+        return result
+    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("""SELECT r.*,o.status AS delivery_status,o.receipt AS delivery_receipt
+            FROM revisions r JOIN heads h ON h.revision=r.id JOIN outbox o ON o.revision=r.id""").fetchall()
+        result["pending_publications"] = db.execute("SELECT count(*) FROM outbox WHERE status!='delivered'").fetchone()[0]
+    now = time.time()
+    active_method = None
+    if any(KnowledgeStore._record(row)["key"].startswith("runbook:") for row in rows):
+        try:
+            assignment = Path(config["runtime_root"]) / "learning/state.json"
+            active_method = load_json(assignment)["active_sha256"]
+            if (not isinstance(active_method, str) or len(active_method) != 64
+                    or any(char not in "0123456789abcdef" for char in active_method)):
+                raise ValueError("Invalid approved method identity")
+            result["runbook_status"] = "assignment_verified"
+        except (OSError, ValueError, KeyError, TypeError):
+            active_method = None
+            result.update(runbook_status="assignment_unavailable", status="degraded",
+                          last_error="Current approved Skill assignment unavailable; runbooks are withheld")
+    for row in rows:
+        record = KnowledgeStore._record(row)
+        scope = record["scope"]
+        if (scope.get("tenant") != config["tenant"] or scope.get("environment") not in config["instances"].values()
+                or scope.get("service") not in config["services"] or row["delivery_status"] != "delivered"
+                or record["state"] != "active" or record.get("valid_until") is not None and record["valid_until"] <= now):
+            continue
+        if record["key"].startswith("runbook:") and (active_method is None
+                or record["content"].get("sha256") != active_method):
+            continue
+        receipt = json.loads(row["delivery_receipt"])
+        receipt = KnowledgeStore._receipt(record, receipt)
+        fact = dict(record["content"])
+        locator = next((source.get("evidence_path") for source in record["sources"] if source.get("evidence_path")), None)
+        if locator:
+            database = Path(locator)
+            if database.name == "state.db" and len(database.parents) > 3:
+                fact["source_run"] = database.parents[3].name
+        fact.update(revision_id=record["revision_id"], parent_revision=record.get("parent_revision"),
+                    sources=record["sources"], citation=receipt, scope=scope,
+                    valid_until=record.get("valid_until"), publication_status="delivered")
+        entry = {**fact, "fact": fact, "revision_id": record["revision_id"],
+                 "scope": scope, "sources": record["sources"], "citation": receipt,
+                 "publication_status": "delivered", "valid_until": record.get("valid_until")}
+        target = "runbooks" if record["key"].startswith("runbook:") else "facts"
+        result[target].append(entry)
+    return result
+
+
 def matches_publication(state, entry):
     evidence = {key: entry[key] for key in FACT_FIELDS}
     validate_fact(evidence)

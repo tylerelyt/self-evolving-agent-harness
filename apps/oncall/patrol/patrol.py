@@ -355,6 +355,12 @@ def inspect_service(sessions, db, service, state, options, skill_sha, *,
     if skill_sha:
         tools.update(skill_view=load_skill, oncall_probe=probe)
         prompt += "只有收到本轮 Hermes steer 的 ONCALL_ALERT 才进入 On-call 调查。"
+    if os.environ.get("ONCALL_MEMORY_CONFIG", "").strip():
+        from apps.oncall.knowledge_tools import instruction, lookup
+        tools["knowledge_lookup"] = lambda: lookup(
+            root=state, receiver=state.name, service=service,
+            environment_id=observed_environment, session_id=session_id)
+        prompt += instruction()
     prompt += ("status 和 summary 只依据本轮 service_snapshot 的当前窗口，error_rate 是 0—1 比率，"
                "1.0 表示 100%，历史读数只供对照。最终只输出 Skill 要求的一个 JSON 报告对象，"
                "不要 Markdown 或额外说明。")

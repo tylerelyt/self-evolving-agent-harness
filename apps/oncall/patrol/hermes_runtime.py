@@ -17,6 +17,8 @@ from environment import DIAGNOSTIC_V1, DIAGNOSTIC_V2
 
 
 ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 SOURCE = Path(os.environ.get("HERMES_SRC", ROOT / ".deps" / "hermes-agent")).expanduser().resolve()
 LESSON19 = Path(__file__).resolve().parents[1] / "integrations/dataset"
 LANGFUSE_PLUGIN = "observability/langfuse"
@@ -24,6 +26,7 @@ ONCALL_SKILL = "oncall-alert-triage"
 PATROL_SKILL = "service-patrol"
 FOLLOWUP_PREFIX = "ONCALL_FOLLOWUP "
 TOOL_DESCRIPTIONS = {
+    "knowledge_lookup": "Retrieve OpenViking historical facts and runbooks for the Harness-bound current service/environment. Read fresh service metrics first; history is not current health or proof of root cause.",
     "patrol_skill_view": "Read the approved service patrol Skill before inspecting the service.",
     "skill_view": "Read the active On-call Skill after receiving an alert.",
     "service_snapshot": "Read fresh HTTP metrics for the assigned service and its current time window.",

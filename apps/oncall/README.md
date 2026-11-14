@@ -11,12 +11,26 @@ bash scripts/setup_skillclaw.sh
 
 ## Continuous service
 
+The default [dedicated deployment profile](../../deploy/profiles/dedicated-oncall.json) includes a managed, persistent **real OpenViking server**. Install its pinned runtime and launch through the supervisor:
+
+```bash
+.deps/hermes-agent/.venv/bin/python deploy/setup_openviking.py
+.deps/hermes-agent/.venv/bin/python -B deploy/manage.py launch \
+  --profile deploy/profiles/dedicated-oncall.json
+```
+
+The profile resumes the same runtime, environments and knowledge namespace. It requires private DeepSeek configuration for OpenViking's indexing summaries, even when the patrol model is scripted. The default local lexical embedding encoder verifies retrieval plumbing; semantic retrieval quality needs separate evaluation. See the [memory contract and operation reference](MEMORY.md) and [deployment setup](../../deploy/README.md#managed-persistent-openviking-memory).
+
+For a direct service process without deployment-managed memory:
+
 ```bash
 .deps/hermes-agent/.venv/bin/python -B -m apps.oncall serve \
   --out /tmp/oncall-system-run
 ```
 
 By default, use a new output directory. This starts two local HTTP environments, recurring Hermes inspections, On-call handling and a background learner. It stays running until interrupted; it does not inject a fixed number of incidents automatically. The default is an explicitly recorded scripted model.
+
+Add `--memory-config /absolute/path/memory.json` to bind an existing OpenViking server. A separate memory worker automatically reviews incidents after verified recovery, publishes sourced facts and current approved runbooks through a durable outbox, and retries failed publication. Patrol and investigation use the real `knowledge_lookup` model tool; its original result remains in the native Hermes Session/Item chain. Retrieval has a five-second deadline by default. An unavailable server produces an explicit tool error while patrol continues; retrieval never falls back to SQLite. Local revision metadata only validates provider-returned citations.
 
 External monitoring produces alerts; the local environment can inject controlled faults. State, service ownership, logs, Sessions and learning records live under the output directory. The [external action boundary](ENTERPRISE.md) connects approved recovery to authenticated tools; the built-in environment remains a local HTTP workload.
 
@@ -44,6 +58,8 @@ The model default follows [DeepSeek's current API documentation](https://api-doc
 
 This opens system mode: runtime management and the complete maintained implementation, without Coding Agent exercises. `--tutorial` selects the separate learner interface; the original workshop entry defaults to tutorial mode. The workbench is a view/control surface over the same execution, evidence and learning behavior.
 
+Use `--memory-config /absolute/path/memory.json` to connect the workbench's service to operator-owned OpenViking. System mode preserves environment identities across reopen and resumes the same active run when code, model and runtime bindings match. Approved Skill bytes and native Session/Item evidence continue from that run; changed code or model creates a separate run. An explicit first memory configuration adds memory to the preserved run. Binding rejection remains an error. Tutorial mode keeps its independent fresh-run behavior. The Memory panel reports real backend availability, pending publication and published current facts; it is a management view, while model recall goes through OpenViking.
+
 ## Finite acceptance rehearsal
 
 ```bash
@@ -60,6 +76,7 @@ The continuous service retains workload assignment and operational recovery stat
 ## Implementation boundary
 
 - `service.py` owns the continuous service and learning loop.
+- `memory.py` owns recovery-triggered fact review and asynchronous OpenViking publication; `knowledge_tools.py` binds model retrieval to the current environment/service.
 - `workflow.py` owns the finite end-to-end verification orchestration.
 - `patrol/` owns HTTP environments, inspection, incident evidence, evaluation and SkillClaw adapters.
 - `workbench*.py` and `web/` own the maintained control surface.

@@ -82,6 +82,10 @@ def investigate(state, environment_state, record, options, *, langfuse=False, se
         "继承的父会话只供对照：其中的 Skill 读取与探测都不算本轮操作，"
         "不能据此跳过本轮读取，也不能把父会话探测计入本轮的三次顺序探测。"
     )
+    memory_enabled = bool(os.environ.get("ONCALL_MEMORY_CONFIG", "").strip())
+    if memory_enabled:
+        from apps.oncall.knowledge_tools import instruction
+        prompt += instruction()
     connection = open_sessions(state, langfuse=langfuse) if sessions is None else nullcontext(sessions)
     with connection as sessions:
         with writer_lock(state), closing(sqlite3.connect(state / "patrol.sqlite")) as patrol_db:
@@ -99,8 +103,13 @@ def investigate(state, environment_state, record, options, *, langfuse=False, se
             # Recover a version from pre-snapshot patrol records as well.
             preserve_skill_version(state, content)
             child, copies = branch_report(sessions, record)
-        rows, _ = run_turn(sessions, child, prompt,
-                           {"skill_view": skill_view, "followup_probe": followup_probe}, options,
+        tools = {"skill_view": skill_view, "followup_probe": followup_probe}
+        if memory_enabled:
+            from apps.oncall.knowledge_tools import lookup
+            tools["knowledge_lookup"] = lambda: lookup(
+                root=state, receiver=state.name, service=service,
+                environment_id=environment_id, session_id=child)
+        rows, _ = run_turn(sessions, child, prompt, tools, options,
                            task_id="followup-" + record["turn_id"] if langfuse else None)
         if checkpoint_rows(sessions, record) != prefix:
             raise RuntimeError("The source checkpoint changed during follow-up")

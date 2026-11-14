@@ -1,18 +1,18 @@
 # Target architecture
 
-Status: initial engineering design; implementation proceeds through the [roadmap](ROADMAP.md).
+Supported components are described in [implementation](IMPLEMENTATION.md); planned capabilities and acceptance conditions are listed in the [roadmap](ROADMAP.md).
 
 ## Purpose and system boundary
 
 Self-Evolving Agent Harness is a long-lived system that performs scoped work, preserves execution evidence, learns reusable facts and methods, and deploys validated improvements into subsequent work. The initial workload is continuous service inspection and On-call investigation.
 
-The deployment target includes a daily personal Harness and dedicated organization/workload Harnesses. Both retain a persistent execution and learning environment. A dedicated adapter can specialize execution, context, tools, authority and task evaluation while reusing the common RSI lifecycle; a tutorial is a consumer of the system rather than a deployment mode. The initial [deployment runner](../../deploy/README.md) is a single-host implementation, with adapter-specific enterprise acceptance tracked separately.
+The deployment target includes a daily personal Harness and dedicated organization/workload Harnesses. Both retain a persistent execution and learning environment. A dedicated adapter can specialize execution, context, tools, authority and task evaluation while reusing the common RSI lifecycle. The [deployment runner](../../deploy/README.md) supports single-host operation; enterprise adapters supply organization-specific integrations.
 
 The first learning target is Memory and Skill behavior with fixed model weights. Harness code and the method that generates improvements can become additional versioned targets later. Model training is not required for the initial system.
 
 The system accepts goals and events, owns execution state, calls models and tools, and produces reports, authorized actions, evidence, and approved capability versions. External monitoring owns alert production. Business services own business state. Human engineers own the decisions that exceed preauthorized policy, including scoped recovery approval.
 
-Tutorials consume stable system capabilities. Tutorial timing, a two-round demonstration, constructed faults, learner checkpoints, and screenshot scripts do not become runtime requirements.
+The continuous service runs until stopped. Controlled verification scenarios use bounded execution, isolated service worlds and explicit fault injection.
 
 ## Architecture overview
 
@@ -34,7 +34,7 @@ flowchart TB
   subgraph knowledge[Evidence and knowledge]
     LOG[Append-only event and execution evidence]
     EP[Episode builder]
-    MEM[Versioned facts and retrieval]
+    MEM[KnowledgeStore authority + OpenViking retrieval]
     DS[Task datasets, environment snapshots, ground truth]
     RT --> LOG
     TOOLS --> LOG
@@ -82,7 +82,7 @@ The loops share evidence and version identity. Execution stays available when le
 | Release controller | Approved artifact references, assignments, rollout/rollback state | Reversing completed business side effects |
 | Workbench / client | Views, commands, approvals and evidence navigation | Authoritative task state |
 
-These are logical boundaries. The first implementation can use one local control process, SQLite, artifact files, and separate worker processes. Split deployment only when workload or isolation requires it.
+Single-host deployment uses local control processes, SQLite, artifact files and separate workers. Multi-host deployment additionally requires distributed ownership and state coordination.
 
 ## Continuous execution and On-call handoff
 
@@ -115,6 +115,16 @@ Memory stores facts with provenance, scope, validity and supersession. Skills st
 Sharing is explicit. A method can be shared across environments while endpoints and topology remain scoped parameters. Retrieval checks tenant/project/environment permissions, then freshness and relevance. An old memory helps locate evidence but does not replace current service observations.
 
 Facts can be updated under preauthorized policy without a full Skill benchmark. Shared or high-impact changes require stronger verification. Each model request records the fact view it actually received, so dynamic knowledge remains auditable.
+
+### Current external-memory implementation
+
+The maintained On-call application implements this boundary with a local `KnowledgeStore` and an external OpenViking service. `KnowledgeStore` owns immutable source-linked fact revisions, exact tenant/environment/service scopes, compare-and-swap heads, TTL/revocation and the publication outbox. SQLite is the authority and retry journal; it is not a parallel retrieval backend. Original Session/Item evidence stays in its source store.
+
+A separate memory worker verifies closed incidents, performs native Hermes fact review and queues approved historical facts and source-derived runbooks for publication. Runbook revisions retain the actual approved Skill tool-read content and are returned only when their digest matches the current assignment. Old revisions are retained for audit rather than rewritten into the new method. New fact/method evidence creates a CAS successor; expired/revoked or superseded documents cannot be revived by the remote index.
+
+The OpenViking adapter checks successful native content/index publication and exact readback. Retrieval uses the pinned Hermes OpenViking provider's `viking_search` and `viking_read`, then checks scope, revision identity, current head, validity and citation hash. An outage is visible as unavailable memory; it cannot be converted into a SQLite cache hit. Patrol and investigation keep historical facts separate from fresh service measurements. The Memory UI exposes the same revision/publication/source chain.
+
+The default dedicated deployment supervises real OpenViking 0.4.12 with persistent filesystem/index state, after `deploy/setup_openviking.py` installation. Its local character n-gram feature-hashing encoder provides lexical vectors while DeepSeek produces bounded indexing summaries; the default cumulative 60-request model budget survives restart. This is a functional deployment and retrieval integration, not proof of semantic retrieval quality, retained RSI gains or production multi-tenant access control. Enterprises can supply an external OpenViking endpoint and independently evaluated embedding/model configuration. See [OpenViking deployment](../../deploy/OPENVIKING.md).
 
 ## Durable learning
 
@@ -190,7 +200,7 @@ System readiness combines three independent gates: functional correctness, real-
 
 ## Proposed package and dependency structure
 
-The following layout is the full migration target. The initial shared package and On-call application exist; remaining subpackages and deployment boundaries are implemented incrementally:
+The following logical package layout describes planned module decomposition; current paths are listed in [implementation](IMPLEMENTATION.md):
 
 ```text
 src/self_evolving_harness/
@@ -212,13 +222,13 @@ tutorials/         # pinned teaching paths and controlled exercises
 examples/          # independently runnable concept exercises
 ```
 
-Dependencies point from applications and tutorials toward core contracts and adapters. Core modules do not import learner code, course numbering, screenshot generation or tutorial orchestration. Adapters reuse upstream Hermes and SkillClaw implementations rather than forking their internal Agent loops.
+Applications and exercise entrypoints depend on core contracts and adapters. Hermes and SkillClaw adapters use their pinned upstream runtime interfaces.
 
-During extraction, existing exercise paths remain compatibility entry points calling the shared implementation. A module moves with its behavioral checks and evidence reader; it is not copied into a second independently maintained runtime. The [roadmap](ROADMAP.md) defines the gates.
+Compatibility entrypoints preserve existing callers and evidence formats. Module changes include behavioral and persistence checks.
 
 ## Engineering references
 
-The architecture combines design lessons; it does not claim these systems share one implementation or that their experiments establish our system's quality:
+Related implementations and research:
 
 - [Hermes background review](https://github.com/NousResearch/hermes-agent/blob/7f9033fbea75361a4844c788c737f40d63caf2af/agent/background_review.py): snapshot review, persistence separation and dispatch restrictions.
 - [Letta context repositories](https://www.letta.com/blog/context-repositories/) and [Mods](https://docs.letta.com/configuration/mods): versioned context and an explicit runtime-extension boundary.
@@ -228,4 +238,4 @@ The architecture combines design lessons; it does not claim these systems share 
 - [AIDE²](https://arxiv.org/abs/2609.26457): nested optimization with budgeted evaluation and separate improver tests.
 - [HyperAgents](https://arxiv.org/abs/2603.19461): making task and improvement procedures editable and testing improvement ability.
 
-These research references do not update this repository's dependency pins. Runtime pins remain in `scripts/` until an explicit compatibility upgrade is verified.
+Runtime dependency pins are recorded in `scripts/`; research references can describe different upstream revisions.

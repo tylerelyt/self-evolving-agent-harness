@@ -42,10 +42,13 @@ def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 class Workbench:
-    def __init__(self, root, implementation_file, *, live=False, mode="tutorial"):
+    def __init__(self, root, implementation_file, *, live=False, mode="tutorial", memory_config=None):
         if mode not in ("system", "tutorial"):
             raise ValueError("Workbench mode must be system or tutorial")
         self.mode = mode
+        self.memory_config = Path(memory_config).expanduser().resolve() if memory_config is not None else None
+        if self.memory_config is not None and not self.memory_config.is_file():
+            raise ValueError("Memory configuration file does not exist")
         self.root = Path(root).resolve()
         self.implementation_file = Path(implementation_file).resolve()
         self.live = live
@@ -68,6 +71,12 @@ class Workbench:
             run = self.root / "runs" / previous
             if (run / "service.json").is_file():
                 self.active_run = run
+                if self.mode == "system" and self.memory_config is None:
+                    configured = optional_json(run / "service-binding.json", {}).get("configuration", {}).get("memory_configuration")
+                    if configured is not None:
+                        self.memory_config = Path(configured["path"]).resolve()
+                        if not self.memory_config.is_file():
+                            raise ValueError("The resumed service memory configuration is unavailable")
         self.background = {}
         for check in self.record["checks"]:
             if check.get("status") == "running":
@@ -85,7 +94,8 @@ class Workbench:
                     raise RuntimeError(f"An environment already owns {directory}. "
                                        "Use --new-state for a new exercise; existing evidence is preserved.")
                 self.environments[alias] = self.spawn(
-                    [sys.executable, "-B", str(HERE / "patrol/environment.py"), "--state", str(directory), "serve"],
+                    [sys.executable, "-B", str(HERE / "patrol/environment.py"), "--state", str(directory), "serve",
+                     *(["--resume"] if self.mode == "system" else [])],
                     directory / "environment.log",
                 )
                 deadline = time.monotonic() + 25
@@ -107,10 +117,28 @@ class Workbench:
     def __exit__(self, *_args):
         self.close()
 
+    def active_memory_binding(self):
+        if self.active_run is None:
+            return None
+        selected = optional_json(self.active_run / "service.json", {}).get("memory_binding")
+        if selected is None:
+            return None
+        if not isinstance(selected, str) or not Path(selected).is_absolute() or not Path(selected).is_file():
+            raise ValueError("Active service memory binding is unavailable")
+        return Path(selected).resolve()
+
     def spawn(self, command, log):
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("a", encoding="utf-8") as output:
-            environment = self.enterprise_recovery.child_environment() if self.enterprise_recovery else None
+            environment = self.enterprise_recovery.child_environment() if self.enterprise_recovery else dict(os.environ)
+            binding = self.active_memory_binding()
+            if self.memory_config is not None:
+                environment.pop("ONCALL_MEMORY_CONFIG", None)
+                if binding is None and any(Path(str(part)).name in {"workbench_chat.py", "workbench_questions.py"}
+                                           for part in command):
+                    raise ValueError("OpenViking 服务绑定尚未就绪，请等待 Agent 启动后再检索或对话。")
+            if binding is not None:
+                environment["ONCALL_MEMORY_CONFIG"] = str(binding)
             return subprocess.Popen(command, stdout=output, stderr=subprocess.STDOUT,
                                     start_new_session=True, env=environment)
 
@@ -277,20 +305,40 @@ class Workbench:
             if stage == 0:
                 raise ValueError("先完成 patrol_config，再启动巡检 Agent。")
         current_sha = file_hash(self.implementation_file)
+        resume = False
+        bound = False
+        memory_current = True
+        if self.mode == "system" and self.active_run is not None and (self.active_run / "service-binding.json").is_file():
+            bound = True
+            saved = load_json(self.active_run / "service-binding.json")["configuration"]
+            expected = {"mode": "live" if self.live else "local-script-model",
+                        "model": (os.environ.get("GLM_MODEL") or "glm-5.2") if self.live else "patrol-fixture",
+                        "model_endpoint": (os.environ.get("GLM_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4") if self.live else "local",
+                        "implementation": str(self.implementation_file), "implementation_sha256": current_sha}
+            resume = all(saved.get(key) == value for key, value in expected.items())
+            if self.memory_config is not None:
+                memory_current = saved.get("memory_configuration") == {
+                    "path": str(self.memory_config), "sha256": file_hash(self.memory_config)}
         if self.agent is not None and self.agent.poll() is None:
-            if current_sha == self.running_sha:
+            if current_sha == self.running_sha and (self.mode == "tutorial" or not bound or resume and memory_current):
                 return {"status": "running", "run": str(self.active_run)}
             self.stop(self.agent)
         recovery = self.acknowledge_recovered_alerts()
         if recovery["acknowledged"] or recovery["errors"]:
             self.event("alerts_acknowledged", f"已确认 {len(recovery['acknowledged'])} 起历史事故恢复",
                        **recovery)
-        run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:6]
-        run = self.root / "runs" / run_id
+        run_id = self.active_run.name if resume else time.strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:6]
+        run = self.active_run if resume else self.root / "runs" / run_id
         command = [sys.executable, "-B", str(HERE / "service.py"), "--out", str(run),
                    "--implementation", str(self.implementation_file),
                    "--environment-a", str(self.root / "environments/instance-a"),
                    "--environment-b", str(self.root / "environments/instance-b")]
+        if self.memory_config is not None:
+            command.extend(("--memory-config", str(self.memory_config)))
+            if resume and "memory_configuration" not in saved:
+                command.append("--enable-memory")
+        if resume:
+            command.append("--resume")
         if stage == 1:
             command.append("--patrol-only")
         elif stage < 4:
@@ -301,10 +349,10 @@ class Workbench:
         self.active_run = run
         self.running_sha = current_sha
         self.record.update(active_run=run_id, running_sha=current_sha, active_stage=stage)
-        self.event("agent_started", "持续 On-call Agent 已启动" if self.mode == "system" else
+        self.event("agent_started", ("正在恢复持续 On-call Agent 原运行" if resume else "正在启动持续 On-call Agent 新运行") if self.mode == "system" else
                    f"已应用当前代码，启动第 {stage} 阶段 Agent", run_id=run_id,
-                   implementation_sha256=current_sha)
-        return {"status": "starting", "run_id": run_id, "stage": stage}
+                   implementation_sha256=current_sha, resumed=resume)
+        return {"status": "starting", "run_id": run_id, "stage": stage, "resumed": resume}
 
     def start_check(self, stage):
         if self.mode == "system":
@@ -501,6 +549,8 @@ class Workbench:
         return sorted(conversations, key=lambda item: item.get("updated_at", item.get("created_at", 0)), reverse=True)[:40]
 
     def start_memory(self, action, incident_id):
+        if self.memory_config is not None or self.active_memory_binding() is not None:
+            raise ValueError("OpenViking 自动复盘已开启；请在 SRE 对话中按服务范围检索知识，旧版手动复盘与召回不适用于此后端。")
         if self.active_run is None:
             raise ValueError("先运行 Agent 并完成一次事故，再复盘或召回。")
         identifier = uuid4().hex[:12]
@@ -619,7 +669,18 @@ class Workbench:
             return False
 
     def memory_snapshot(self):
-        from workbench_memory import memory_state
+        from workbench_memory import memory_state, openviking_state
+
+        try:
+            binding = self.active_memory_binding()
+            if binding is not None:
+                return openviking_state(binding)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            return {"backend": "openviking", "status": "error", "facts": [], "recalls": [],
+                    "automatic_review": True, "last_error": type(error).__name__}
+        if self.memory_config is not None:
+            return {"backend": "openviking", "status": "waiting_service", "facts": [], "recalls": [],
+                    "automatic_review": True, "pending_publications": 0}
 
         memory = memory_state(self.root)
         memory["recalls"] = [{**entry, "source": f"memory:{entry['id']}",

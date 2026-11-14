@@ -21,6 +21,16 @@
   "settings": {
     "workload": "oncall-local",
     "verification_mode": "scripted-model",
-    "enterprise_identity": "not_integrated"
+    "enterprise_identity": "not_integrated",
+    "memory": {
+      "backend": "openviking",
+      "managed": true,
+      "port": 1933,
+      "max_model_requests": 60,
+      "tenant": "oncall",
+      "retrieval_timeout": 5,
+      "publication_timeout": 100
+    },
+    "memory_indexing_mode": "real-deepseek-summaries-local-lexical-embedding"
   }
 }

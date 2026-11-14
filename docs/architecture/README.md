@@ -1,38 +1,34 @@
-# Long-lived self-improving system
+# Architecture
 
-This directory defines the engineering direction of Self-Evolving Agent Harness: a maintained system that performs recurring work, learns from verified experience, evaluates changes, and adopts approved versions in subsequent work.
+Self-Evolving Agent Harness performs recurring work, preserves execution evidence, learns scoped facts and reusable methods, evaluates proposed changes, and assigns approved versions to subsequent tasks. Personal and dedicated deployments use the same lifecycle contracts.
 
-The system has its own architecture, interfaces, releases, and acceptance criteria. Tutorials teach selected capabilities of a pinned system version. A tutorial does not define the production architecture or certify production readiness.
+![Harness RSI target architecture](../../assets/images/maintained-rsi-system.png)
 
-It is intended for daily personal Harness use and dedicated workload/enterprise Harnesses. [Deployment profiles](../../deploy/README.md) provide single-host lifecycle and persistent workspaces; organization-specific context, tools, policy and evaluation belong to the dedicated adapter.
+The diagram includes implemented single-host components and planned distributed, rollout and deeper-evolution capabilities. [Editable source](../../assets/images/maintained-rsi-system.svg).
 
-## Design documents
+## Documentation
 
-![Maintained Harness RSI target architecture](../../assets/images/maintained-rsi-system.png)
+- [Target architecture](TARGET-ARCHITECTURE.md): responsibilities, execution and learning loops, state ownership and recovery.
+- [Shared contracts](CONTRACTS.md): object vocabulary and invariants for execution, evidence, evaluation and adoption.
+- [Implementation](IMPLEMENTATION.md): maintained modules, supported behavior and verification limits.
+- [Roadmap](ROADMAP.md): remaining capabilities and their acceptance conditions.
+- [OpenViking deployment](../../deploy/OPENVIKING.md): installation, supervised lifecycle, native retrieval and encoder limits.
+- [Runtime and exercise modules](../adr/0001-system-and-tutorials.md): dependencies and compatibility.
+- [Deployment profiles](../adr/0002-personal-and-dedicated-harness.md): personal and dedicated state ownership.
+- [Contributing](../../CONTRIBUTING.md): validation, contracts and releases.
 
-Personal and dedicated deployments use the same RSI contracts. Tutorials are a versioned teaching view; the lower dashed panel identifies deeper evolution targets. The figure describes the target architecture, not completion of every component. [Editable diagram source](../../assets/images/maintained-rsi-system.svg).
+## Runtime modules
 
-- [Target architecture](TARGET-ARCHITECTURE.md): responsibilities, execution and learning loops, state ownership, deployment, recovery, and operational requirements.
-- [Shared contracts](CONTRACTS.md): the objects and invariants connecting execution, evidence, learning, evaluation, publication, and adoption.
-- [Engineering roadmap](ROADMAP.md): evidence required at each milestone, including the current implementation boundary.
-- [Implementation and verification](IMPLEMENTATION.md): extracted code, actual local checks and remaining integration work.
-- [System/tutorial separation decision](../adr/0001-system-and-tutorials.md): dependency direction and migration rules.
-- [Personal and dedicated deployment decision](../adr/0002-personal-and-dedicated-harness.md): the two uses of the same technical system.
-- [Contribution workflow](../../CONTRIBUTING.md): changing the system and keeping teaching material aligned.
+[`apps/oncall`](../../apps/oncall/README.md) provides continuous inspection, incident handling, the workbench and workload integrations. The installable package includes the application, static resources and shared core. Exercise entrypoints and compatibility wrappers call the maintained modules with their own configuration and state.
 
-## Current implementation boundary
+The shared core supplies immutable Skill artifacts and bundles, paired evaluation gates, candidate history, durable jobs, personal assignments, signed approvals and action reconciliation. The dedicated deployment resumes the same workspace, native Sessions/Items and approved methods after restart.
 
-The maintained application, HTTP environment, workbench, Skills and integrations live in [`apps/oncall`](../../apps/oncall/README.md). The installable wheel includes these modules and static resources; runtime imports do not depend on `examples/` or `workshop/`. Existing teaching commands delegate to the same maintained source.
+`KnowledgeStore` owns exact tenant/environment/service scopes, source-linked revisions, CAS heads, TTL/revocation and a publication outbox. A separate worker reviews completed incidents and publishes facts and runbooks to OpenViking. Reads use the pinned Hermes native provider; local SQLite validates revision authority and delivery state. Runbooks must match the active approved Skill digest. The Memory view exposes citations and publication status.
 
-The shared core implements immutable Skill snapshots and complete bundles, paired evaluation gates, a candidate lifecycle ledger, durable job leases/checkpoints/retries, personal governed assignments, authenticated scoped approvals and action reconciliation. Continuous learning uses that core. The dedicated On-call deployment resumes the same workspace, native Sessions/Items and approved methods after restart.
+The default dedicated profile supervises OpenViking 0.4.12 after installation. DeepSeek generates indexing summaries under a cumulative default budget of 60 requests. The supplied character n-gram encoder supports lexical retrieval; semantic ranking quality requires evaluation with the chosen production encoder.
 
-The [personal learning path](../../deploy/PERSONAL-LEARNING.md) has actual DeepSeek/Hermes learning, independent tool evaluation, publication, new-task adoption and rollback evidence. The [enterprise boundary](../../apps/oncall/ENTERPRISE.md) executes recovery through an authenticated gateway with signed exact-scope approvals; organization-specific SSO and real service commands remain deployment inputs.
+[Personal governed tasks](../../deploy/PERSONAL-LEARNING.md) use evaluated Skill assignments. [Dedicated recovery](../../apps/oncall/ENTERPRISE.md) uses authenticated scope grants, signed approvals and tool receipts. Organization SSO, real service tools and domain evaluation are deployment inputs.
 
-The complete controlled walkthrough is verified with a scripted model. Real-model On-call acceptance completed four incidents with both generated revisions correctly rejected; this is guarded operation, not a demonstrated On-call quality gain. Failures remain recorded independently, and a successful personal task does not certify another workload. Long-duration quality, multi-host scheduling, production canaries and autonomous Harness/improver evolution remain separate gates.
+## Supported scope
 
-
-## Architecture ownership
-
-This directory is the canonical home for system-level decisions. Tutorial-specific setup, learner changes, constructed faults, expected observations, and grading stay in [tutorials](../../tutorials/README.md) and the existing exercise directories.
-
-A design can be proposed before its implementation is complete. Acceptance requires runnable behavior and linked evidence; documentation, diagrams, and screenshots alone do not satisfy a runtime milestone.
+The current deployment is single-host. Scripted-model checks verify deterministic behavior and protocol integration; real-model runs cover bounded tasks and can reject proposed updates. These results do not establish long-duration quality gains or semantic retrieval quality. Multi-host scheduling, production canaries and autonomous Harness/improver modification remain on the [roadmap](ROADMAP.md).

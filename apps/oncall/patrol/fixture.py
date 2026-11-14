@@ -61,7 +61,12 @@ def respond(messages):
             current.append((calls.get(item["tool_call_id"]), item["content"]))
     if isinstance(prompt, str) and prompt.startswith(FOLLOWUP_PREFIX):
         header = prompt.partition("\n")[0]
-        return respond_followup(json.loads(header.removeprefix(FOLLOWUP_PREFIX)), current)
+        memory_enabled = "ONCALL_KNOWLEDGE_ENABLED" in prompt
+        if (memory_enabled and sum(name == "followup_probe" for name, _ in current) == 3
+                and not any(name == "knowledge_lookup" for name, _ in current)):
+            return "knowledge_lookup", {}
+        return respond_followup(json.loads(header.removeprefix(FOLLOWUP_PREFIX)),
+                                [(name, content) for name, content in current if name != "knowledge_lookup"])
     results = {}
     alert = None
     probes = []
@@ -82,6 +87,8 @@ def respond(messages):
     observation = results["service_snapshot"]
     if observation.get("error"):
         return None, {"status": "unavailable", "history_id": None, "summary": observation["error"]}
+    if "ONCALL_KNOWLEDGE_ENABLED" in (prompt or "") and "knowledge_lookup" not in results:
+        return "knowledge_lookup", {}
     if alert and "skill_view" not in results:
         return "skill_view", {"name": ONCALL_SKILL}
     if alert and results["skill_view"].get("sha256"):
@@ -97,6 +104,8 @@ def respond(messages):
         "summary": f"当前窗口有 {observation['requests']} 个请求，"
                    f"5xx 比例 {observation['error_rate']}，P95 {observation['p95_ms']} ms。",
     }
+    if results.get("knowledge_lookup", {}).get("error"):
+        report["summary"] += "历史知识检索不可用；当前判断仅依据本轮现场指标。"
     if alert and probes:
         status = probes[0]
         assessment = "failure_observed" if status >= 500 else "not_reproduced"
