@@ -7,6 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = {
+    "Demo entry": ("scripts/test_demo.py",),
     "Shared system core": ("-m", "unittest", "discover", "-s", "tests/core", "-p", "test_*.py"),
     "Installer": ("scripts/test_setup_deps.py",),
     # The lesson's full suite also tests notification shapes against the installed SDK.

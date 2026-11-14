@@ -1,6 +1,8 @@
 # Contributing
 
-Start with the [architecture](docs/architecture/README.md), [module boundaries](docs/adr/0001-system-and-tutorials.md) and [roadmap](docs/architecture/ROADMAP.md).
+Run `make setup` once, then `make check`. Change one module, reproduce the affected behavior, then run the relevant checks. `make demo` exercises the native On-call loop with a scripted model.
+
+[Module boundaries](docs/adr/0001-system-and-tutorials.md) · [architecture](docs/architecture/README.md) · [roadmap](docs/architecture/ROADMAP.md).
 
 ## Code and documentation
 
