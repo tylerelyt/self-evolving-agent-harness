@@ -2,6 +2,7 @@
 """Check a peer handoff in a fresh Hermes session using historical and live receipts."""
 
 import argparse
+from contextlib import closing
 import hashlib
 import json
 import math
@@ -125,6 +126,12 @@ def read_evidence(rows, prompt, scope, session_id, *, openviking_namespace=None,
 
 
 def handoff(state, memory, environment_state, scope, options, *, openviking_namespace=None, receiver=None):
+    options = dict(options)
+    context = options.pop("memory_context", None)
+    if context is not None:
+        if openviking_namespace is not None or receiver is not None:
+            raise ValueError("Choose one source of external-memory configuration")
+        openviking_namespace, receiver = context["openviking_namespace"], context["receiver"]
     session_id = "patrol-handoff-" + uuid.uuid4().hex
     prompt = (
         "请做一次同伴事故交接核对。范围为 " + json.dumps(scope, ensure_ascii=False) + "。"
@@ -161,6 +168,26 @@ def handoff(state, memory, environment_state, scope, options, *, openviking_name
                          openviking_namespace=openviking_namespace, receiver=receiver)
 
 
+def verify_saved_handoff(state, scope, result, *, openviking_namespace=None, receiver=None):
+    """Verify a selected implementation's return against its native SessionDB."""
+    if not isinstance(result, dict) or not isinstance(result.get("session_id"), str):
+        raise ValueError("Memory handoff must return a persisted Hermes session")
+    database = Path(state) / "hermes" / "state.db"
+    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        rows = [dict(row) for row in db.execute(
+            "SELECT * FROM messages WHERE session_id = ? ORDER BY id", (result["session_id"],))]
+    if not rows:
+        raise ValueError("Memory handoff did not leave a persisted Hermes session")
+    for row in rows:
+        row["tool_calls"] = json.loads(row["tool_calls"] or "[]")
+    verified = read_evidence(rows, rows[0]["content"], scope, result["session_id"],
+                             openviking_namespace=openviking_namespace, receiver=receiver)
+    if result != verified:
+        raise ValueError("Memory handoff differs from its persisted Hermes tool receipts")
+    return verified
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, required=True)
@@ -175,6 +202,7 @@ def main():
     parser.add_argument("--environment-state", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--offline", action="store_true", help="Drive the actual Hermes tools using a local scripted model")
+    parser.add_argument("--implementation", type=Path, help="Use the selected implementation's memory hook")
     args = parser.parse_args()
     home = args.state / "hermes"
     if any(path.exists() or path.is_symlink() for path in (home, args.out)):
@@ -197,8 +225,20 @@ def main():
             "base_url": url, "api_key": "local-fixture" if args.offline else os.environ["GLM_API_KEY"],
             "model": "handoff-fixture" if args.offline else os.environ.get("GLM_MODEL") or "glm-5.2",
         }
-        result = handoff(args.state, memory_path, args.environment_state, scope, options,
-                         openviking_namespace=args.openviking_namespace, receiver=args.receiver)
+        if args.implementation is None:
+            result = handoff(args.state, memory_path, args.environment_state, scope, options,
+                             openviking_namespace=args.openviking_namespace, receiver=args.receiver)
+        else:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+            from implementation import load_implementation
+
+            if args.openviking:
+                options["memory_context"] = {"openviking_namespace": args.openviking_namespace,
+                                             "receiver": args.receiver}
+            implementation = load_implementation(args.implementation)
+            result = implementation.recall_memory(args.state, memory_path, args.environment_state, scope, options)
+            result = verify_saved_handoff(args.state, scope, result,
+                                          openviking_namespace=args.openviking_namespace, receiver=args.receiver)
     with args.out.open("x", encoding="utf-8") as output:
         json.dump(result, output, ensure_ascii=False, indent=2)
         output.write("\n")

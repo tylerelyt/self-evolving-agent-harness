@@ -82,28 +82,9 @@ def extract_answer(raw):
             'outside_text': raw}
 
 
-def assess_probe(result, expected, explanation_review=None):
-    raw = result.get('final_response', '')
-    parsed = extract_answer(raw)
-    answer = parsed['answer']
-    calls = tool_calls(result.get('messages', []))
-    references = [c for c in calls if c['name'] == 'skill_view'
-                  and isinstance(c['args'], dict) and c['args'].get('file_path')
-                  and isinstance(c['receipt'], dict) and c['receipt'].get('success') is True
-                  and isinstance(c['receipt'].get('content'), str) and c['receipt']['content'].strip()]
-    review = explanation_review or {}
-    reviewed = (review.get('response_sha256') == hashlib.sha256(raw.encode()).hexdigest()
-                and review.get('consistent') is True and bool(review.get('note')))
-    needs_review = answer is None or bool(parsed['outside_text']) and not reviewed
-    schema = (isinstance(answer, dict) and set(answer) == {'diagnosis', 'next_check'}
-              and isinstance(answer.get('next_check'), str) and bool(answer['next_check'].strip()))
-    diagnosis = isinstance(answer, dict) and answer.get('diagnosis') == expected
-    content_pass = completed(result) and diagnosis and schema and bool(references)
-    return {'completion_pass': completed(result), 'diagnosis_pass': bool(diagnosis),
-            'references_pass': bool(references), 'answer_schema_pass': bool(schema),
-            'strict_json_format_pass': parsed['strict_json_format_pass'], 'answer_source': parsed['source'],
-            'answer': answer, 'explanation_review': review or None, 'needs_review': needs_review,
-            'task_pass': None if needs_review else bool(content_pass)}
+def assess_probe(result, kind):
+    from diagnostics import assess
+    return assess(result, kind, extract_answer(result.get('final_response', '')))
 
 
 class CurationLab:
@@ -128,7 +109,7 @@ class CurationLab:
                   'memory': {'memory_enabled': False, 'user_profile_enabled': False, 'nudge_interval': 0},
                   'skills': {'creation_nudge_interval': 0}, 'compression': {'enabled': False}}
         (self.home / 'config.yaml').write_text(yaml.safe_dump(config, allow_unicode=True))
-        self.loops = []; self.native = None; self.checks = {}
+        self.loops = []; self.native = None; self.checks = {}; self.probes = {}
 
     def seed(self):
         from tools.skill_manager_tool import skill_manage
@@ -224,37 +205,72 @@ class CurationLab:
         print('原生整理结果：', self.native['outcome'])
         print(native.get('llm_final', ''))
 
-    def probe(self, kind):
+    def probe(self, kind, phase='after'):
         from run_agent import AIAgent
         from hermes_state import SessionDB
         from hermes_cli.plugins import set_thread_tool_whitelist, clear_thread_tool_whitelist
-        tasks = {
-            'pool': ('prod-eu checkout-api，09:00-09:05。请求量为平时5倍，active接近max，waiting升高；流量回落后active恢复，每个请求连接均归还。', 'capacity-pressure'),
-            'leak': ('prod-eu checkout-api，10:00-10:05。请求量已恢复，active仍为max，waiting不降；异常返回的请求持有连接超过300秒，尚未检查释放代码。', 'suspected-leak')}
-        evidence, expected = tasks[kind]
-        db = SessionDB(self.home / ('probe-' + kind + '.db'))
+        from diagnostics import case, prompt, register_query, probe_tools
+        kind = {'pool': 'capacity'}.get(kind, kind)
+        if phase not in ('before', 'after') or kind not in ('capacity', 'leak'):
+            raise ValueError('请选择 before/after 和 capacity/leak')
+        if (phase, kind) in self.probes:
+            raise ValueError('本项已有运行；请保留原记录，在新运行中重新比较')
+        load_credentials()
+        register_query(kind)
+        session = 'probe-' + phase + '-' + kind
+        db = SessionDB(self.home / (session + '.db'))
         agent = None
         try:
             agent = AIAgent(model='glm-5.2', provider='custom', api_mode='chat_completions',
                 api_key=os.environ['GLM_API_KEY'], base_url=os.environ['GLM_BASE_URL'],
-                enabled_toolsets=['skills'], max_iterations=8, max_tokens=2048,
+                enabled_toolsets=['skills', 'curation_diagnostics'], max_iterations=12, max_tokens=2048,
                 request_overrides={'temperature': 0}, quiet_mode=True, skip_context_files=True,
-                load_soul_identity=False, save_trajectories=False, session_id='probe-' + kind, session_db=db)
-            allowed = {'skills_list', 'skill_view'}
-            agent.tools = [t for t in agent.tools if t['function']['name'] in allowed]; agent.valid_tool_names = allowed
+                load_soul_identity=False, save_trajectories=False, session_id=session, session_db=db)
+            allowed = {'skills_list', 'skill_view', 'diagnostic_query'}
+            agent.tools = probe_tools(); agent.valid_tool_names = allowed
             set_thread_tool_whitelist(allowed)
-            result = agent.run_conversation(user_message='构造教学现场：' + evidence + '\n自行查找并读取当前技能及相关说明。只读诊断。返回JSON：diagnosis取capacity-pressure、suspected-leak或unknown；next_check用中文说明下一步。', conversation_history=[])
-            calls = tool_calls(result.get('messages', []))
-            assessment = assess_probe(result, expected)
-            self.checks['新入口任务-' + kind] = assessment['task_pass']
-            record(self.root / ('probe-' + kind + '.json'), {'constructed': True, 'input': evidence, 'expected': expected,
-                'result': result, 'calls': calls, 'assessment': assessment, 'passed': assessment['task_pass']})
-            return {'assessment': assessment, 'final_response': result.get('final_response')}
+            result = agent.run_conversation(user_message=prompt(kind), conversation_history=[])
+            assessment = assess_probe(result, kind)
+            entry = {'constructed': True, 'phase': phase, 'input': prompt(kind), 'snapshot': case(kind),
+                'session_id': session, 'session_db': str(self.home / (session + '.db')),
+                'protocol': {'model': 'glm-5.2', 'base_url': os.environ['GLM_BASE_URL'], 'temperature': 0,
+                             'max_iterations': 12, 'max_tokens': 2048},
+                'result': result, 'calls': tool_calls(result.get('messages', [])), 'assessment': assessment,
+                'passed': assessment['task_pass']}
+            self.probes[phase, kind] = entry
+            record(self.root / (session + '.json'), entry)
+            if phase == 'after':
+                self.compare_probe(kind)
+            return {'session_id': session, 'assessment': assessment, 'final_response': result.get('final_response')}
         finally:
             clear_thread_tool_whitelist()
             if agent is not None:
                 agent.close()
             db.close()
+
+    def compare_probe(self, kind):
+        before, after = (self.probes.get((phase, kind)) for phase in ('before', 'after'))
+        if before is None or after is None:
+            raise ValueError('能力保留对照需要整理前后同题独立会话')
+        comparable = (before['protocol'] == after['protocol'] and before['input'] == after['input']
+                      and before['assessment']['snapshot_sha256'] == after['assessment']['snapshot_sha256']
+                      and before['session_id'] != after['session_id'])
+        retained = comparable and before['passed'] is True and after['passed'] is True
+        self.checks['整理前后能力保留-' + kind] = retained
+        comparison = {'kind': kind, 'comparable': comparable, 'before_session': before['session_id'],
+                      'after_session': after['session_id'], 'before_passed': before['passed'],
+                      'after_passed': after['passed'], 'retained': retained,
+                      'skill_reads': {phase: [call['args'] for call in item.get('calls', []) if call['name'] == 'skill_view']
+                                     for phase, item in (('before', before), ('after', after))},
+                      'rule_locations': {phase: [entry['resource'] for entry in item['assessment']['rule_receipts']]
+                                         for phase, item in (('before', before), ('after', after))},
+                      'snapshot_sha256': before['assessment']['snapshot_sha256'],
+                      'changed_checks': {name: [before['assessment']['checks'][name], value]
+                         for name, value in after['assessment']['checks'].items()
+                         if before['assessment']['checks'][name] != value},
+                      'claim': '同题能力保留检查；单次运行不证明模型收益或更容易发现入口'}
+        record(self.root / ('comparison-' + kind + '.json'), comparison)
+        return comparison
 
     def recover(self):
         from agent import curator_backup
@@ -266,7 +282,29 @@ class CurationLab:
             restored = {'name': archived[0], 'result': skill_usage.restore_skill(archived[0])}
             if not restored['result'][0]:
                 raise RuntimeError(str(restored))
-        candidates = [p for p in self.skills.rglob('references/*.md') if '.archive' not in p.parts]
+        def linked_resources():
+            targets = set()
+            for file in self.skills.rglob('*.md'):
+                relative = file.relative_to(self.skills)
+                if any(part.startswith('.') for part in relative.parts) or relative.parts[0] == 'disaster-recovery':
+                    continue
+                for link in re.findall(r'\]\(([^)#]+)(?:#[^)]*)?\)', file.read_text()):
+                    if '://' in link:
+                        continue
+                    target = (file.parent / link).resolve()
+                    if target.is_relative_to(self.skills.resolve()) and target.is_file() and target != file:
+                        targets.add(target)
+            return sorted(targets)
+        candidates = linked_resources()
+        preparation = None
+        if not candidates:
+            # A valid consolidation can inline all details. Restore the known
+            # initial library before the separate missing-resource rehearsal.
+            ok, message, _ = curator_backup.rollback(self.backup.name)
+            preparation = {'restored_initial_library': ok, 'reason': 'No linked external resources remain', 'message': message}
+            if not ok:
+                raise RuntimeError('无法准备独立的支持资源恢复演练')
+            candidates = linked_resources()
         if not candidates:
             raise RuntimeError('当前技能库没有可用于失联演练的参考文件，不能虚构演练成功')
         damaged = candidates[0]; saved = damaged.read_bytes(); damaged.unlink()
@@ -279,6 +317,7 @@ class CurationLab:
         self.checks['发现支持文件失联'] = bool(missing)
         self.checks['原生快照恢复正文'] = bool(ok and tree(self.skills) == self.before)
         record(self.root / 'recovery.json', {'constructed_failure': True, 'single_restore': restored,
+            'preparation': preparation, 'damaged_resource': str(damaged.relative_to(self.skills)),
             'broken_links': missing, 'rollback_ok': ok, 'message': message, 'safety_snapshot': str(safety)})
 
     def finish(self, offline=False):
@@ -288,7 +327,8 @@ class CurationLab:
                   'model_curation_executed': self.native is not None, 'constructed': True}
         record(self.root / 'result.json', result)
         record(self.root / 'REPORT.md', '# 技能库整理记录\n\n' + json.dumps(result, ensure_ascii=False, indent=2)
-               + '\n\n[状态转换](transitions.json) · [恢复](recovery.json)\n')
+               + '\n\n[状态转换](transitions.json) · [恢复](recovery.json)\n'
+               + ('\n[容量同题对照](comparison-capacity.json) · [泄漏同题对照](comparison-leak.json)\n' if not offline else ''))
         print('记录：', self.root / 'REPORT.md')
         if not result['passed']:
             raise RuntimeError('本次有未通过项，保留记录，不自动修饰模型结果')
@@ -305,13 +345,15 @@ def main():
         if lab.backup is None:
             raise RuntimeError('未取得原生快照，停止恢复演练')
     else:
+        for kind in ('capacity', 'leak'):
+            print(lab.probe(kind, phase='before'))
         lab.prepare_review()
         try:
             lab.observe_review(curator.run_curator_review(consolidate=True, synchronous=True))
         finally:
             lab._restore_observer()
-        for kind in ('pool', 'leak'):
-            print(lab.probe(kind))
+        for kind in ('capacity', 'leak'):
+            print(lab.probe(kind, phase='after'))
     lab.recover(); lab.finish(offline=args.offline)
 
 

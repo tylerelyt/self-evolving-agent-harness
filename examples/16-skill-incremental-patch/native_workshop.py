@@ -8,11 +8,9 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
 import uuid
 
 from common import HERE, completed, record, tool_calls, sanitize_logging, receipt_object
-from native_trace import candidate_check
 from package_integrity import (
     snapshot, content_files, package_hash, install_candidate, native_review_complete,
 )
@@ -37,6 +35,11 @@ tools:
 """
 
 
+def candidate_check(review):
+    from native_trace import candidate_check as check_candidate
+    return check_candidate(review)
+
+
 def check_space():
     free = shutil.disk_usage(HERE).free
     if free < 1024**3:
@@ -53,7 +56,7 @@ def source_info():
     if head != REVISION:
         raise RuntimeError("Hermes 不是课程固定提交")
     files = ("native_workshop.py", "native_trace.py", "scenario.py",
-             "package_integrity.py", "common.py", "native_observer.py", "config/native-skill-review-policy.md")
+             "package_integrity.py", "common.py", "native_observer.py", "config/native-skill-review-policy.md", "../notebook_native_results.py")
     return {"hermes_revision": head,
             "source_hashes": {p: hashlib.sha256((HERE/p).read_bytes()).hexdigest() for p in files}}
 
@@ -351,21 +354,24 @@ def confirm_candidate(review, auto_approve):
             "candidate_sha256": digest}
 
 
-def run_live(auto_approve=True):
-    model_options()
-    check_space()
-    version = source_info()
-    version["validation_run_id"] = os.environ.get("LESSON16_VALIDATION_ID")
-    run = HERE/"runtime"/("native-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
-    home = run/"hermes"
-    configure_home(home)
-    record(run/"version.json", version)
+def run_live(auto_approve=True, run_dir=None):
+    sys.path.insert(0, str(HERE.parent))
+    from notebook_native_results import start_run
+    version = {"validation_run_id": os.environ.get("LESSON16_VALIDATION_ID")}
+    run = start_run(HERE, version["validation_run_id"], run_dir)
+    db = None
     audit = []
-    register_query(audit)
-    record(run/"seed.json", seed_library())
-    from hermes_state import SessionDB
-    db = SessionDB(home/"state.db")
     try:
+        model_options()
+        check_space()
+        version.update(source_info())
+        home = run/"hermes"
+        configure_home(home)
+        record(run/"version.json", version)
+        register_query(audit)
+        record(run/"seed.json", seed_library())
+        from hermes_state import SessionDB
+        db = SessionDB(home/"state.db")
         task, prompt = foreground(db, scenario.TASK, scenario.INITIAL_CASE, audit,
                                 run/"investigation.json")
         task["loaded_seed_content"] = loaded_before_query(
@@ -398,8 +404,9 @@ def run_live(auto_approve=True):
                           "model_requests": task["model_requests"] + review["model_requests"]}
                 record(run/"result.json", {**result, **version})
                 record(run/"REPORT.md", "# 本次原生练习\n\n未确认采用。查看 [复盘](review.json) 与 [确认记录](approval.json)。\n")
-                record(HERE/"validation/native-live-latest.json",
-                       {**result, **version, "run": run.name, "report": str(run/"REPORT.md")})
+                if run_dir is None:
+                    record(HERE/"validation/native-live-latest.json",
+                           {**result, **version, "run": run.name, "report": str(run/"REPORT.md")})
                 print(json.dumps({**result, "report": str(run/"REPORT.md")}, ensure_ascii=False))
                 return result
             installed = install_candidate(run/"candidate/skills", home/"skills",
@@ -426,20 +433,27 @@ def run_live(auto_approve=True):
                                         + sum(t["model_requests"] for t in future)}
         record(run/"audit.json", audit)
         record(run/"result.json", {**result, **version})
-        record(HERE/"validation/native-live-latest.json",
-               {**result, **version, "run": run.name, "report": str(run/"REPORT.md")})
+        if run_dir is None:
+            record(HERE/"validation/native-live-latest.json",
+                   {**result, **version, "run": run.name, "report": str(run/"REPORT.md")})
         record(run/"REPORT.md", "# 本次原生练习\n\n状态："+result["status"]+
                "\n\n[调查](investigation.json) · [原生复盘](review.json) · [库变化与运行结果](result.json) · [业务回执](audit.json)\n")
         print(json.dumps({**result, "report": str(run/"REPORT.md")}, ensure_ascii=False))
         return result
     except BaseException as error:
-        record(run/"failure.json", {"status": "failed", "error": str(error), "path": "native-live"})
-        record(HERE/"validation/native-live-latest.json",
-               {"status": "failed", "passed": False, "error": str(error), "run": run.name, **version})
+        failure = {"status": "failed", "passed": False, "error": str(error), "path": "native-live", **version}
+        record(run/"failure.json", failure)
+        record(run/"result.json", failure)
+        record(run/"audit.json", audit)
+        record(run/"REPORT.md", "# 本次原生练习\n\n状态：failed。原始过程与错误保留在本目录。\n")
+        if run_dir is None:
+            record(HERE/"validation/native-live-latest.json",
+                   {"status": "failed", "passed": False, "error": str(error), "run": run.name, **version})
         raise
     finally:
-        db.close()
-        record(run/"cleanup.json", {"session_db_closed": True, "persistent_server": False})
+        if db is not None:
+            db.close()
+        record(run/"cleanup.json", {"session_db_closed": db is not None, "persistent_server": False})
 
 
 def inspect_only():
@@ -460,6 +474,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="运行真实模型调查与复盘，会产生 API 费用")
     parser.add_argument("--no-auto-approve", action="store_true", help="采用候选前要求输入完整哈希确认")
+    parser.add_argument("--run-dir", type=Path, help="本次专用运行目录；必须是runtime下尚不存在的直接子目录")
     parser.add_argument("--review-job", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.review_job:
@@ -467,7 +482,7 @@ def main():
             parser.error("后台模型运行必须显式指定 --live")
         review_job(args.review_job)
     elif args.live:
-        result = run_live(auto_approve=not args.no_auto_approve)
+        result = run_live(auto_approve=not args.no_auto_approve, run_dir=args.run_dir)
         return 0 if result["status"] in ("passed", "no-update", "not-adopted") else 1
     else:
         inspect_only()

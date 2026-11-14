@@ -48,7 +48,8 @@ def run_once(runtime, index, faults):
     route_revision = None
     if runtime.prior_facts is not None:
         runtime.step(f"Round {index}: recall the other instance's historical fact and check current HTTP metrics")
-        handoff = handoff_facts(iteration, runtime.environments, runtime.prior_facts, runtime.shared, runtime.live, openviking=runtime.viking)
+        handoff = handoff_facts(iteration, runtime.environments, runtime.prior_facts, runtime.shared, runtime.live,
+                               openviking=runtime.viking, implementation_file=runtime.implementation_file)
     if index == 2:
         runtime.step(f"Round {index}: verify a diagnostic route migration, revise Memory and adopt it in a fresh session")
         route_revision = revise_diagnostic_memory(iteration, runtime.environments["instance-a"],

@@ -70,7 +70,18 @@ Memory 留下了发生过什么，Skill 则决定下一次怎样调查。最后�
 
 有了发布记录，再制造一组新的故障。可以交换两端的持续失败与间歇失败。观察新的调查是否多做了获准的复核，再核对实际使用的 Skill 版本。两端都有新的采用证据，才能确认共享方法已经进入后续工作。
 
-四步完成后，再运行[完整双实例演练](../README.md#运行双实例演练)，核对两轮故障交换、正式发布、新现场采用和回退条件。SRE 对话的结束或单次调查完成，不能代替这份全链路验收。
+四步完成后，先对当前实现重跑累计检查，再将同一份实现交给[完整双实例演练](../README.md#运行双实例演练)：
+
+```bash
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/lab/check.py --stage 4 \
+  --out workshop/capstone/runtime/final-check
+.deps/hermes-agent/.venv/bin/python -B workshop/capstone/self_improvement_agent.py \
+  --implementation workshop/capstone/lab/self_improvement_agent.py \
+  --stage-check workshop/capstone/runtime/final-check/check.json \
+  --out workshop/capstone/runtime/own-fleet --verify-closed-loop
+```
+
+这两条命令默认使用脚本模型；真实模型验收时，两条都加 `--live`。每次重跑使用新的输出目录。最终演练会冻结这份实现，核对累计检查的源码摘要与运行模式，并实际调用六个实现入口；不需要另写一套总编排。`report.json` 的 `implementation` 保存源码摘要、累计检查摘要与实际调用记录，`closed_loop_verified` 为真才证明本轮完成发布及后续采用。候选未通过、没有增益或采用证据不足时，保留正式版并继续巡检，但完整提升链路仍未验证；严格验收返回非零。SRE 对话结束或单次调查完成，不能代替这些证据。
 
 在工作台「正式版本回退」准备方案，核对当前版本、目标版本与两端范围，再明确批准。回退后分别检查真实 HTTP 新任务与冻结现场的行为回放；前者证明当前接收和执行，后者在相同失败现场比较方法。两种来源不能混称为线上验证。生产灰度和分布式平台的后续系统设计见[设计练习](../PRODUCTION-DESIGN.md)。
 

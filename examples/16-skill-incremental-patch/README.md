@@ -53,6 +53,8 @@ bash examples/16-skill-incremental-patch/run.sh --live
 
 没有修订时返回 `no-update`，保留原生说明，不强行补写方法，也不展示后续复用；这不等于练习失败，更不等于已经学会。采用后回放未通过则返回失败，保留实际记录，不自动重跑到成功。
 
+Notebook 为每次执行分配独立目录，并核对本次启动身份。非零退出或超时时，仍先显示本轮已有的调查、原始复盘回执、文件差异和错误；未进入的阶段显示未取得，状态保留为失败。`no-update` 单独记录，不当成技能学习成功；不会寻找旧运行补齐缺失内容。
+
 ## 核心调用
 
 [native_workshop.py](native_workshop.py) 的 `foreground()` 用新 Session 和空历史调用 `AIAgent.run_conversation()`。调查结束后，`review_job()` 显式执行：

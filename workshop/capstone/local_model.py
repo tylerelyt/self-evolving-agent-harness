@@ -1,6 +1,7 @@
 """本机脚本模型。通过真实 HTTP 和 Hermes 工具循环验证固定故障场景。"""
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from http_server import LoopbackHTTPServer
 import json
 import re
 from threading import Thread
@@ -108,7 +109,7 @@ def serve(respond=decide):
             except (KeyError, TypeError, ValueError, AttributeError) as exc:
                 self.send_error(400, type(exc).__name__)
 
-    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+    with LoopbackHTTPServer(('127.0.0.1', 0), Handler) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:

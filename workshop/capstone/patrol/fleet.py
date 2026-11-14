@@ -337,14 +337,22 @@ def newer_checkpoint(state, service, after, environment_id, *, healthy=False):
 
 def start_patrols(root, environments, stack, live, *, scoped, langfuse, implementation_file=None):
     workers = {}
+    config = {"services": list(TARGETS.values()), "sample": 2, "interval": 1}
+    if implementation_file is not None:
+        from oncall_service import patrol_configuration
+        config = patrol_configuration(implementation_file)
     for alias, environment in environments.items():
         state = root / "patrols" / alias
         state.mkdir(parents=True)
-        args = ["run", "--fleet-worker", "--interval", "1", "--environment-state", str(environment)]
+        args = ["run", "--fleet-worker", "--interval", str(config["interval"]),
+                "--sample", str(config["sample"]), "--environment-state", str(environment)]
         if not live:
             args.append("--offline")
         if scoped:
             args.extend(("--service", TARGETS[alias]))
+        elif implementation_file is not None:
+            for service in config["services"]:
+                args.extend(("--service", service))
         if langfuse:
             args.append("--langfuse")
         if implementation_file is not None:
@@ -392,7 +400,8 @@ def collect_patrols(root, environments, workers, receivers, skill_hash, options,
     return (*archive_patrols(root, records, skill_hash), injected_at)
 
 
-def patrol_round(root, environments, receivers, skill_hash, options, live, *, scoped=False, langfuse=False):
+def patrol_round(root, environments, receivers, skill_hash, options, live, *, scoped=False, langfuse=False,
+                 implementation_file=None):
     from skillclaw_bridge import capture
 
     root.mkdir()
@@ -424,6 +433,8 @@ def patrol_round(root, environments, receivers, skill_hash, options, live, *, sc
                 args.append("--offline")
             if langfuse:
                 args.append("--langfuse")
+            if implementation_file is not None:
+                args.extend(("--implementation", str(implementation_file)))
             children[alias] = stack.enter_context(process(
                 "patrol.py", instance, instance / "patrol.log", *args,
             ))
@@ -563,7 +574,7 @@ def review_facts(iteration, proofs, recovered, shared, live, *, openviking=None)
     return entries
 
 
-def handoff_facts(iteration, environments, prior, shared, live, *, openviking=None):
+def handoff_facts(iteration, environments, prior, shared, live, *, openviking=None, implementation_file=None):
     handoff_root = iteration / "fact-handoff"
     entries = {}
     shared_before = sha256(shared) if shared.is_file() else None
@@ -584,6 +595,8 @@ def handoff_facts(iteration, environments, prior, shared, live, *, openviking=No
                              "--receiver", receiver))
             if not live:
                 args.append("--offline")
+            if implementation_file is not None:
+                args.extend(("--implementation", str(implementation_file)))
             children[receiver] = stack.enter_context(process("fact_handoff.py", state, state / "handoff.log", *args))
             entries[receiver] = {"source_instance": source, "receipt": str(output.relative_to(iteration))}
         for receiver, child in children.items():
@@ -710,7 +723,7 @@ def verify_adoption(proof, faults):
             raise RuntimeError(f"{alias} did not demonstrate the approved Skill's conditional probe")
 
 
-def run_rollback_rehearsal(root, report, environments, receivers, recovered, options, live):
+def run_rollback_rehearsal(root, report, environments, receivers, recovered, options, live, *, implementation_file=None):
     from skillclaw_evolve import FORMAL_GROUP, release
 
     first, last = report["rounds"]
@@ -760,7 +773,8 @@ def run_rollback_rehearsal(root, report, environments, receivers, recovered, opt
                 and alert["emitted_at"] >= injected[alias]
             ))
             drill = root / "rollback-rehearsal"
-            proofs, _ = patrol_round(drill, environments, receivers, seed_sha, options, live, scoped=True)
+            proofs, _ = patrol_round(drill, environments, receivers, seed_sha, options, live, scoped=True,
+                                     implementation_file=implementation_file)
             result["patrol_evidence"] = str((drill / "patrol-evidence.json").relative_to(root))
             earlier = {session for phase in report["rounds"] for session in phase["source_sessions"].values()}
             for alias, proof in proofs.items():
@@ -782,19 +796,37 @@ def run_rollback_rehearsal(root, report, environments, receivers, recovered, opt
 
 
 def run(root, options, live, *, gepa=False, enterprise=False, langfuse=False, openviking=False,
-        rehearse_rollback=False, implementation_file=None):
+        rehearse_rollback=False, implementation_file=None, stage_check=None):
     sys.path.insert(0, str(HERE.parent))
-    from implementation import REFERENCE, load_implementation
+    from implementation import (REFERENCE, bind_implementation, load_implementation,
+                                implementation_evidence, verify_stage_check)
     from oncall_runtime import Runtime
+    from self_improvement_agent import run as run_workflow
 
     implementation_file = Path(implementation_file or REFERENCE).resolve()
+    implementation_file, binding = bind_implementation(implementation_file, Path(root) / "implementation")
+    if stage_check is not None:
+        check_bytes = Path(stage_check).read_bytes()
+        binding["stage_check"] = verify_stage_check(stage_check, binding["sha256"], live=live)
+        if hashlib.sha256(check_bytes).hexdigest() != binding["stage_check"]["sha256"]:
+            raise RuntimeError("The cumulative stage check changed while binding the final rehearsal")
+        (implementation_file.parent / "stage-check.json").write_bytes(check_bytes)
     implementation = load_implementation(implementation_file)
     with Runtime(root, options, live, gepa=gepa, enterprise=enterprise,
                  langfuse=langfuse, openviking=openviking, rehearse_rollback=rehearse_rollback,
                  implementation_file=implementation_file) as runtime:
         runtime.implementation = implementation
-        implementation.run(runtime)
+        runtime.report["implementation"] = binding
+        run_workflow(runtime)
         runtime.finish()
+        runtime.report["implementation"] = implementation_evidence(implementation_file, binding)
+        rounds = runtime.report["rounds"]
+        runtime.report["closed_loop_verified"] = (
+            runtime.report["status"] == "complete"
+            and runtime.report["implementation"]["all_hooks_executed"]
+            and any(entry.get("decision") == "publish" for entry in rounds)
+            and any(entry.get("adoption_verified") is True for entry in rounds)
+        )
     return runtime.report
 
 
@@ -810,9 +842,13 @@ def main(argv=None):
     parser.add_argument("--rehearse-rollback", action="store_true",
                         help="Restore the prior approved Skill and verify it in fresh lab patrols")
     parser.add_argument("--implementation", type=Path, help="Use this On-call implementation throughout the run")
+    parser.add_argument("--stage-check", type=Path, help="Passed cumulative stage-4 check for this exact implementation")
+    parser.add_argument("--verify-closed-loop", action="store_true",
+                        help="Fail unless publication and later adoption used every selected implementation hook")
     args = parser.parse_args(argv)
     if args.serve:
-        if any((args.gepa, args.enterprise, args.langfuse, args.openviking, args.rehearse_rollback)):
+        if any((args.gepa, args.enterprise, args.langfuse, args.openviking, args.rehearse_rollback,
+                args.stage_check, args.verify_closed_loop)):
             parser.error("Extension and rollback flags apply to the controlled rehearsal")
         sys.path.insert(0, str(HERE.parent))
         from implementation import REFERENCE
@@ -857,8 +893,10 @@ def main(argv=None):
         }
         report = run(root, options, args.live, gepa=args.gepa, enterprise=args.enterprise,
                      langfuse=args.langfuse, openviking=args.openviking, rehearse_rollback=args.rehearse_rollback,
-                     implementation_file=args.implementation)
+                     implementation_file=args.implementation, stage_check=args.stage_check)
     print(f"{root / 'report.json'} ({report['status']})", flush=True)
+    if args.verify_closed_loop and not report.get("closed_loop_verified"):
+        raise SystemExit("The run did not verify selected-hook execution, publication and later adoption; inspect report.json")
 
 
 if __name__ == "__main__":

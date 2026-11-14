@@ -10,9 +10,12 @@ SUITES = {
     "Installer": ("scripts/test_setup_deps.py",),
     # The lesson's full suite also tests notification shapes against the installed SDK.
     "Steer evidence": ("examples/02-instruction-control/test_control_validation.py", "EvidenceTests", "LifecycleTests"),
+    "Skill initialization": ("examples/07-skill-extraction/test_initialization.py",),
     "Skill disclosure": ("examples/08-progressive-disclosure/test_check_report.py",),
     "Background review": ("examples/11-background-review/test_offline.py",),
     "Memory revision": ("workshop/oncall/test_acceptance.py",),
+    "Revision entry": ("examples/12-memory-revision/test_revision_start.py",),
+    "Native attempt evidence": ("examples/test_notebook_native_results.py",),
     "Curator adoption": ("examples/17-curator/test_risks.py",),
     "Business grading": ("examples/18-business-eval/alert_selftest.py",),
     "Enterprise dataset": ("examples/19-enterprise-dataset/selftest.py",),

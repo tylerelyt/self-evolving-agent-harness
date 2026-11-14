@@ -134,7 +134,7 @@ class Runtime:
                 self.step("Rehearse rollback and verify the restored Skill in fresh patrols")
                 run_rollback_rehearsal(
                     self.root, self.report, self.environments, self.receivers,
-                    self.recovered, self.options, self.live,
+                    self.recovered, self.options, self.live, implementation_file=self.implementation_file,
                 )
         self.stack.close()
         workset_path = self.root / "http-workset.json"

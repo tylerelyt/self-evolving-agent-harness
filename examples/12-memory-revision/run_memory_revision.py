@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """第 12 讲：真实 Hermes 在线材料 → 自动后台修订 → 新会话使用规则。
 
-这几行是核心：查找下文相同标记。业务服务是本地样例；复盘不是自建循环。
+独立起点预置明确标记的旧事实；修订由真实原生后台完成。
 每次使用全新教学 HERMES_HOME，原有运行目录和个人记忆不动。
 """
 import difflib
@@ -88,16 +88,28 @@ def completed(result):
     assert result.get("final_response") and result.get("turn_exit_reason"), "未正常完成一轮"
 
 
-def tool_checks():
-    """手动给真工具传参，只验证工具约束；不把这些调用当作模型自主决策。"""
+def seed_old_memory():
+    """构造待修订的旧事实；不把起点算作模型学习或修订。"""
     store = MemoryStore()
     store.load_from_disk()
+    receipts = []
+    for content in (OLD, KEEP):
+        receipt = json.loads(memory_tool(action="add", target="memory", content=content, store=store))
+        assert receipt.get("success"), receipt
+        receipts.append({"action": "add", "content": content, "receipt": receipt})
+    assert MEM.read_text().split(ENTRY_DELIMITER) == [OLD, KEEP]
+    save("seed.json", {"constructed": True, "model_generated": False,
+         "purpose": "迁移前的旧事实与仍有效的独立条目", "receipts": receipts})
+    return store
+
+
+def tool_checks():
+    """手动给真工具传参，只验证工具约束；不把这些调用当作模型自主决策。"""
+    store = seed_old_memory()
     def call(**args):
         result = json.loads(memory_tool(store=store, target="memory", **args))
         assert result.get("success"), result
         return result
-    call(action="add", content=OLD)
-    call(action="add", content=KEEP)
     call(action="add", content="payment-api-prod 另有测试用说明，勿用于生产。")
     before = MEM.read_text()
     tests = [("多条命中", "payment-api-prod", "不应写入", "Multiple entries matched"),
@@ -160,6 +172,10 @@ def catalog(version):
 def check_local():
     """不请求模型；只验证真实 memory 工具与 AIAgent 启动/重建的实现。"""
     tool_checks()
+    seed = json.loads((OUT / "seed.json").read_text())
+    assert seed["constructed"] is True and seed["model_generated"] is False
+    assert [item["content"] for item in seed["receipts"]] == [OLD, KEEP]
+    assert all(item["receipt"].get("success") for item in seed["receipts"])
     # 仅供初始化；这个分支绝不调用 run_conversation，不发送 API 请求。
     key = "unused-no-api-requests"
     old_agent = make_agent(key)
@@ -203,11 +219,11 @@ def check_local():
 
 
 def main():
-    key = os.environ.get("GLM_API_KEY") or os.environ.get("BIGMODEL_API_KEY")
+    key = os.environ.get("GLM_API_KEY")
     if not key:
-        raise RuntimeError("未实跑：需要 GLM_API_KEY 或 BIGMODEL_API_KEY")
+        raise RuntimeError("请在当前进程配置 GLM_API_KEY；独立修订不读取个人凭据文件")
     print("输出目录：", OUT, flush=True)
-    tool_checks()
+    seed_old_memory()
     before = MEM.read_text()
     save("memory-before.md", before)
     save("catalog.json", catalog(1))
@@ -310,10 +326,19 @@ if __name__ == "__main__":
     try:
         if sys.argv[1:] == ["--check-local"]:
             check_local()
-        elif sys.argv[1:]:
-            raise ValueError("只支持无参数完整运行或 --check-local 本地核验")
-        else:
+        elif sys.argv[1:] == ["--live"]:
             main()
+        else:
+            raise ValueError("模型演练须显式传 --live；无模型检查使用 --check-local")
     except Exception as exc:
         save("summary.json", {"status": "failed", "error": str(exc), "type": type(exc).__name__})
         raise
+    finally:
+        available = [name for name in ("seed.json", "summary.json", "tool-checks.json", "memory-before.md",
+            "memory-after.md", "memory.diff", "01-temporary-foreground.json", "01-temporary-review.json",
+            "02-migration-foreground.json", "02-migration-review.json", "snapshot-old.txt", "snapshot-new.txt",
+            "03-new-session.json", "service-events.jsonl") if (OUT / name).exists()]
+        save("REPORT.md", "# 记忆修订记录\n\n旧事实为构造起点，不是本次模型学习。"
+             "后台是否修订，以原生工具回执和文件差异为准。\n\n"
+             + "\n".join(f"- [{name}]({name})" for name in available))
+        print("本次记录：", OUT / "REPORT.md", flush=True)

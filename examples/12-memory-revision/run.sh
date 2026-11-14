@@ -6,6 +6,17 @@ export ONCALL_LESSON=12
 if [[ "${1:-}" == "status" || "${1:-}" == "down" ]]; then
   exec "$HERE/../../workshop/oncall/lab" "$@"
 fi
+if [[ "${1:-}" == "revision" ]]; then
+  shift
+  if [[ $# -ne 1 || "$1" != "--live" ]]; then
+    echo '独立修订会调用模型：run.sh revision --live；无模型检查使用 run.sh check。' >&2
+    exit 2
+  fi
+  HERMES_SRC="${HERMES_SRC:-$HERE/../../.deps/hermes-agent}"
+  PYTHON="${HERMES_PYTHON:-$HERMES_SRC/.venv/bin/python}"
+  export HERMES_SRC
+  exec "$PYTHON" -B "$HERE/run_memory_revision.py" --live
+fi
 if [[ "${1:-}" == "check" ]]; then
   shift
   HERMES_SRC="${HERMES_SRC:-$HERE/../../.deps/hermes-agent}"

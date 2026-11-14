@@ -79,6 +79,8 @@ bash scripts/setup_skillclaw.sh
 
 重跑时换一个尚不存在的 `--out` 目录。演练启动两个独立 HTTP 环境和两条持续巡检循环。A、B 各用一个进程和一套检查点。先等两端分别提交健康巡检记录，再注入支付持续失败和订单间歇失败。巡检只访问实验的本机回环地址。中断时会清理本次注入的故障，保留失败报告供检查。
 
+以上命令运行完整参考实现。验证自己写的版本时，按[四步实作的最终验收](lab/README.md#第-4-步让团队改进下一次的做法)传入 `--implementation`、同源码与模式的 `--stage-check` 和 `--verify-closed-loop`。完整编排由框架提供，运行开始冻结选定实现，巡检、告警、分支、通知、Memory 交接和放行判断均使用这一份代码。
+
 ### 跑完先看三份记录
 
 终端最后会打印 `report.json` 的路径。以下文件都在这次的 `--out` 目录中。
@@ -86,6 +88,8 @@ bash scripts/setup_skillclaw.sh
 1. 打开 `round-1/patrol-loop.json`，看两个 Agent 何时写下健康检查点，发出值班通知后何时恢复巡检。
 2. 打开 `report.json`，看 `status` 是否为 `complete`，再读第一轮的 `decision`。若发布了候选，对照第二轮的 `adoption_verified`。
 3. 回到 `round-2/collection/patrol-evidence.json`，选一个实例，对照它实际读取的 Skill 哈希和探测回执。由这条记录判断新一轮用到了什么。
+
+`report.json` 另记录 `implementation.sha256` 与六个入口的实际调用证据。`closed_loop_verified` 同时要求选定入口已执行、候选已发布以及后续任务已验证采用；仅运行结束、阶段检查通过或文件同步不代表提升链路成立。
 
 演化或评测异常会在 `learning_errors` 中留下原因，本轮最终状态保留为 `learning_failed`。正式版本保留或恢复完成后，巡检继续运行，受控演练仍可收集下一轮事故证据。若部分发布后的恢复未完成，编排器停止追加故障并保留已有证据。完整成功审计会将这类运行判为未完成。
 

@@ -2,7 +2,7 @@
 
 from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
 import tempfile
@@ -10,7 +10,7 @@ from threading import Thread
 import unittest
 from unittest.mock import patch
 
-from environment import (alert_event, get_snapshot, get_telemetry, monitor_alerts, probe_service,
+from environment import (LoopbackHTTPServer, alert_event, get_snapshot, get_telemetry, monitor_alerts, probe_service,
                          publish_alert, read_alert, write_json)
 from fleet import set_faults
 
@@ -119,7 +119,7 @@ class EnvironmentTests(unittest.TestCase):
             def log_message(self, *_args):
                 pass
 
-        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        with LoopbackHTTPServer(("127.0.0.1", 0), Handler) as server:
             self.endpoint(f"http://127.0.0.1:{server.server_port}")
             worker = Thread(target=server.serve_forever)
             worker.start()

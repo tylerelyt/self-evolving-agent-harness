@@ -10,4 +10,7 @@ fi
 export HERMES_PYTHON="$PYTHON"
 export PYTHONPATH="$HERMES_SRC${PYTHONPATH:+:$PYTHONPATH}"
 export PYTHONDONTWRITEBYTECODE=1
+if [[ "${1:-}" == '--offline' ]]; then
+  "$PYTHON" -B "$HERE/test_risks.py"
+fi
 exec "$PYTHON" -B "$HERE/curation_workshop.py" "$@"

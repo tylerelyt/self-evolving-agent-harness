@@ -40,6 +40,8 @@ bash examples/15-skill-autocreation/run.sh --live
 
 课程只检查回执配对、完成状态、完整文件追溯和构造现场的查询结果。流程是否通用、学习信号是否充分，以及为什么创建或不创建，仍需学员阅读完整记录作判断。
 
+Notebook 为每次执行分配独立目录，并核对本次启动身份。非零退出或超时时，仍先显示本轮已有的调查、原始复盘回执、文件差异和错误；未进入的阶段显示未取得，状态保留为失败。`no-update` 单独记录，不当成技能学习成功；不会寻找旧运行补齐缺失内容。
+
 ## 核心调用
 
 实际代码在 [native_workshop.py](native_workshop.py) 和 [scenario.py](scenario.py)。前台通过 `AIAgent.run_conversation(..., conversation_history=[])` 完成调查，消息保存在SessionDB；后台执行：
