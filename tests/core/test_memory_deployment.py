@@ -15,7 +15,7 @@ class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
   self.send_response(200);self.end_headers();self.wfile.write(b'{"status":"ok"}')
 server=HTTPServer(('127.0.0.1',a.port),Handler)
-record=state/'server.json';record.write_text(json.dumps({'pid':os.getpid(),'status':'ready','endpoint':f'http://127.0.0.1:{a.port}'}))
+record=state/'server.json';record.write_text(json.dumps({'pid':os.getpid(),'ppid':os.getppid(),'pgrp':os.getpgrp(),'status':'ready','endpoint':f'http://127.0.0.1:{a.port}'}))
 (state/'retained-evidence').touch(exist_ok=True)
 def stop(*args):threading.Thread(target=server.shutdown).start()
 signal.signal(signal.SIGTERM,stop)
@@ -74,12 +74,25 @@ class MemoryDeploymentTests(unittest.TestCase):
   checkout=self.root/'checkout';(checkout/'deploy').mkdir(parents=True)
   code=SERVER.replace('import argparse,json,os,signal,threading','import argparse,json,os,signal,threading,sys').replace('a=p.parse_args()','a,_=p.parse_known_args()').replace("'pid':os.getpid()","'pid':os.getpid(),'prefix':sys.prefix,'base_prefix':sys.base_prefix,'executable':sys.executable")
   (checkout/'deploy/openviking.py').write_text(code)
-  settings={'backend':'openviking','managed':True,'port':0,'server_python':str(python)}
-  with patch.object(launcher,'ROOT',checkout), launcher.memory_service(settings,self.root):
-   record=json.loads((self.root/'openviking/server.json').read_text())
-   self.assertEqual(record['prefix'],str(venv))
-   self.assertNotEqual(record['prefix'],record['base_prefix'])
-   self.assertEqual(record['executable'],str(python))
+  settings={'backend':'openviking','managed':True,'port':0,'server_python':str(python),'startup_timeout':5}
+  popen=launcher.subprocess.Popen;children=[]
+  def capture(*args,**kwargs):
+   child=popen(*args,**kwargs);children.append(child);return child
+  try:
+   with patch.object(launcher,'ROOT',checkout), patch.object(launcher.subprocess,'Popen',capture), launcher.memory_service(settings,self.root):
+    record=json.loads((self.root/'openviking/server.json').read_text())
+    self.assertEqual(record['prefix'],str(venv))
+    self.assertNotEqual(record['prefix'],record['base_prefix'])
+    self.assertEqual(record['executable'],str(python))
+  except RuntimeError:
+   marker=self.root/'openviking/server.json'
+   record=json.loads(marker.read_text()) if marker.exists() else {}
+   reported=record.get('pid');group=None
+   if reported:
+    try:group=os.getpgid(reported)
+    except ProcessLookupError:pass
+   raise AssertionError(json.dumps({'status':record.get('status'),'owned_pids':[c.pid for c in children],
+       'reported_pid':reported,'reported_group':record.get('pgrp',group),'reported_parent':record.get('ppid'),'exit_codes':[c.poll() for c in children]})) from None
 
  def test_missing_runtime_reports_install_command(self):
   settings={'backend':'openviking','managed':True,'server_python':str(self.root/'missing')}
