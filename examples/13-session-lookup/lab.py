@@ -84,12 +84,17 @@ def send(sid, message):
     return task['id']
 
 
-def wait(tid, timeout=600):
+def wait(tid, timeout=600, *, allow_failed_source=False):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         task = api('/tasks/' + tid)
         reviews = api('/reviews?' + urlencode({'after_task': tid}))
-        if task['status'] in ('failed', 'interrupted') and not any(r['status'] == 'running' for r in reviews):
+        if (allow_failed_source and task.get('drained') and task['status'] in ('failed', 'interrupted')
+                and all(r['status'] != 'running' for r in reviews)):
+            print('源会话未成功；保留失败状态，继续从原始消息核查，不将它记作完成。')
+            return task, reviews
+        if (task['status'] in ('failed', 'interrupted') and not allow_failed_source
+                and not any(r['status'] == 'running' for r in reviews)):
             raise RuntimeError('前台失败且没有仍在运行的复盘；原始错误已保存，不继续等待不存在的后台')
         if task.get('drained') and all(r['status'] != 'running' for r in reviews):
             print('前台：', task['status'], '；后台：', ', '.join(r['status'] for r in reviews))

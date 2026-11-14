@@ -69,6 +69,41 @@ def execution_state(pair):
     return 'unknown'
 
 
+def memory_observations(pairs):
+    """报告源操作的真实状态；失败或暂存不算写入完成。"""
+    records = []
+    for pair in pairs:
+        if pair['name'] != 'memory':
+            continue
+        args = pair['args'] if isinstance(pair['args'], dict) else {}
+        operations = args.get('operations') or [args]
+        write = (args.get('target', 'memory') == 'memory'
+                 and any(isinstance(op, dict) and op.get('action') in ('add', 'replace') for op in operations))
+        state = execution_state(pair)
+        records.append({**pair, 'execution_state': state,
+                        'write_completed': bool(write and state == 'completed')})
+    return records
+
+
+def successful_search(pair):
+    return (pair['pairing'] == 'matched' and isinstance(pair['args'], dict)
+            and isinstance(pair['receipt'], dict) and pair['receipt'].get('success') is True)
+
+
+def visible_pair_ids(searches, source):
+    """核查模型实际读到了同一对原文，不能只展开标题就算溯源。"""
+    messages = {}
+    for search in searches:
+        if not successful_search(search) or search['args'].get('session_id') != source['session_id']:
+            continue
+        for message in search['receipt'].get('messages', []):
+            if isinstance(message, dict) and message.get('id') is not None:
+                messages[message['id']] = message
+    seen = pair_messages(list(messages.values()))
+    return {pair['tool_call_id'] for pair in source['pairs']
+            if pair['pairing'] == 'matched' and pair in seen}
+
+
 def digest(messages):
     return hashlib.sha256(json.dumps(messages, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
@@ -126,12 +161,6 @@ def verify_live(db_path, tasks, directory, before_audit):
     finally:
         reopened.close()
     memory_calls = [p for p in memory['pairs'] if p['name'] == 'memory']
-    def saved_memory(pair):
-        if execution_state(pair) != 'completed' or not isinstance(pair['args'], dict):
-            return False
-        operations = pair['args'].get('operations') or [pair['args']]
-        return (pair['args'].get('target', 'memory') == 'memory'
-                and any(op.get('action') in ('add', 'replace') for op in operations))
     memory_file = db_path.parent / 'memories/MEMORY.md'
     pairs = incident['pairs']
     command = lambda p: p['args'].get('command', '') if isinstance(p['args'], dict) else ''
@@ -139,30 +168,46 @@ def verify_live(db_path, tasks, directory, before_audit):
     pauses = [p for p in pairs if 'pause repeat-pay' in command(p) and execution_state(p) == 'completed']
     pause_end = max((p['receipt_message_id'] for p in pauses), default=-1)
     later = [p for p in pairs if (p['request_message_id'] or -1) > pause_end]
+    denied_rollbacks = [p for p in rollbacks if execution_state(p) == 'denied'
+                        and receipt_payload(p).get('task_created') is False]
+    describes = [p for p in later if p['pairing'] == 'matched' and execution_state(p) != 'failed'
+                 and receipt_payload(p).get('batch_active') is False
+                 and receipt_payload(p).get('version') == 'sample-v2' and 'describe' in command(p)]
+    logs = [p for p in later if p['pairing'] == 'matched' and execution_state(p) != 'failed'
+            and 'logs' in command(p) and len(receipt_payload(p).get('rows', [])) >= 10
+            and all(row.get('status') == 200 for row in receipt_payload(p)['rows'][-10:])]
     audit_calls = pair_messages(audit_messages)
     searches = [p for p in audit_calls if p['name'] == 'session_search']
-    def successful_search(pair):
-        return (pair['pairing'] == 'matched' and isinstance(pair['args'], dict)
-                and isinstance(pair['receipt'], dict) and pair['receipt'].get('success') is True)
+    memory_seen = visible_pair_ids(searches, memory)
+    incident_seen = visible_pair_ids(searches, incident)
+    memory_states = memory_observations(memory_calls)
+    memory_nonempty = memory_file.exists() and bool(memory_file.read_text().strip())
     checks = {
-        '所有前台正常完成': all(t['status'] == 'completed' and completed(t['result']) for t in tasks.values()),
-        '原生Session中有memory写入及同编号完成回执': any(saved_memory(p) for p in memory_calls),
-        '本轮Memory文件实际非空': memory_file.exists() and bool(memory_file.read_text().strip()),
-        '回滚被拒绝而不是已经完成': bool(rollbacks) and any(execution_state(p) == 'denied' and receipt_payload(p).get('task_created') is False for p in rollbacks),
-        '暂停完成后再次查询业务部署': bool(pauses) and any(p['pairing'] == 'matched' and execution_state(p) != 'failed' and receipt_payload(p).get('batch_active') is False and receipt_payload(p).get('version') == 'sample-v2' and 'describe' in command(p) for p in later),
-        '暂停完成后再次查询业务日志': bool(pauses) and any(p['pairing'] == 'matched' and execution_state(p) != 'failed' and 'logs' in command(p) and len(receipt_payload(p).get('rows', [])) >= 10 and all(row.get('status') == 200 for row in receipt_payload(p)['rows'][-10:]) for p in later),
+        '事故与核查前台正常完成': all(tasks[key]['status'] == 'completed' and completed(tasks[key]['result']) for key in ('incident', 'audit')),
+        '原生Memory请求与同编号回执可核对': any(p['pairing'] == 'matched' for p in memory_calls),
+        '核查实际读到Memory请求和原回执': bool(memory_seen),
+        '回滚被拒绝而不是已经完成': bool(denied_rollbacks),
+        '暂停完成后再次查询业务部署': bool(pauses and describes),
+        '暂停完成后再次查询业务日志': bool(pauses and logs),
         '新会话实际发现旧消息': all(any(successful_search(p) and p['args'].get('query')
                                       and any(h.get('session_id') == tasks[key]['session'] for h in p['receipt'].get('results', []))
                                       for p in searches) for key in ('memory', 'incident')),
         '新会话按窗口展开事故与memory记录': all(any(successful_search(p) and p['args'].get('session_id') == tasks[key]['session']
                                                  and p['args'].get('around_message_id') and p['args'].get('window')
                                                  and p['receipt'].get('messages') for p in searches) for key in ('memory', 'incident')),
+        '核查实际读到回滚及暂停的原请求回执': (any(p['tool_call_id'] in incident_seen for p in denied_rollbacks)
+                                              and any(p['tool_call_id'] in incident_seen for p in pauses)),
+        '核查实际读到后续业务查询回执': all(any(p['tool_call_id'] in incident_seen for p in verified)
+                                             for verified in (describes, logs)),
         '回查不执行业务或记忆写入': bool(audit_calls) and all(p['name'] == 'session_search' for p in audit_calls),
         '回查前后旧消息不变且重开可查': before_audit == after and persisted,
     }
     result = {'path': 'native-live', 'checks': checks, 'passed': all(checks.values()),
               'report_review_required': True, 'memory': memory, 'incident': incident,
               'audit': {'messages': audit_messages, 'pairs': audit_calls},
+              'source_memory': {'task_status': tasks['memory']['status'], 'operations': memory_states,
+                                'write_completed': any(p['write_completed'] for p in memory_states),
+                                'file_nonempty': memory_nonempty, 'file_presence_is_execution_proof': False},
               'unknown_boundary': '未找到记录不等于未发生；受理不等于完成，操作完成不等于业务恢复或恢复原因。'}
     record(directory / 'history-check.json', result)
     return result

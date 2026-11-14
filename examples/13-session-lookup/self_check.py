@@ -95,6 +95,105 @@ class Checks(unittest.TestCase):
         finally:
             db.close()
 
+    def history_fixture(self, memory_payload, *, source_status='completed', hide_receipts=False,
+                        rollback_state='denied', tamper_memory_receipt=False):
+        """构造请求留档；检索、展开、重开与验收都使用真实 SessionDB。"""
+        from hermes_state import SessionDB
+        from tools.session_search_tool import session_search
+        from validation_checks import digest, verify_live
+        import uuid
+        directory = Path(os.environ['HERMES_HOME']) / ('trace-' + uuid.uuid4().hex)
+        directory.mkdir()
+        db = SessionDB(directory / 'state.db')
+        sessions = ('memory-source', 'incident-source', 'audit-source')
+        for sid in sessions:
+            db.create_session(sid, source='cli')
+        def call(sid, identity, name, args, payload):
+            db.append_message(sid, 'assistant', '', tool_calls=request(identity, name, args)['tool_calls'])
+            db.append_message(sid, 'tool', json.dumps(payload), tool_call_id=identity, tool_name=name)
+        db.append_message(sessions[0], 'user', 'lesson13-memory 保存约定')
+        call(sessions[0], 'memory-raw', 'memory', {'action': 'add', 'content': '约定'}, memory_payload)
+        db.append_message(sessions[1], 'user', 'rollback 之后恢复的说法需要核查')
+        call(sessions[1], 'rollback-raw', 'terminal', {'command': 'payctl rollback'},
+             {'status': rollback_state, 'task_created': rollback_state != 'denied'})
+        call(sessions[1], 'pause-raw', 'terminal', {'command': 'payctl pause repeat-pay'}, {'status': 'completed'})
+        call(sessions[1], 'describe-raw', 'terminal', {'command': 'payctl describe'},
+             {'version': 'sample-v2', 'batch_active': False})
+        call(sessions[1], 'logs-raw', 'terminal', {'command': 'payctl logs'}, {'rows': [{'status': 200}] * 10})
+        before = {sid: digest(db.get_messages(sid, include_inactive=True)) for sid in sessions[:2]}
+        db.append_message(sessions[2], 'user', '从原始请求与回执核查两项旧事')
+        for index, (sid, query) in enumerate(zip(sessions[:2], ('lesson13-memory', 'rollback'))):
+            discovery = json.loads(session_search(query=query, db=db))
+            hit = next(h for h in discovery['results'] if h['session_id'] == sid)
+            call(sessions[2], 'search-' + str(index), 'session_search', {'query': query}, discovery)
+            args = {'session_id': sid, 'around_message_id': hit['match_message_id'], 'window': 20}
+            view = json.loads(session_search(db=db, **args))
+            if hide_receipts:
+                view['messages'] = [m for m in view['messages'] if m['role'] != 'tool']
+            if tamper_memory_receipt and sid == sessions[0]:
+                for message in view['messages']:
+                    if message.get('tool_call_id') == 'memory-raw':
+                        message['content'] = json.dumps({'success': True, 'done': True})
+            call(sessions[2], 'scroll-' + str(index), 'session_search', args, view)
+        db.close()
+        tasks = {key: {'session': sid, 'status': source_status if key == 'memory' else 'completed',
+                       'result': {'completed': key != 'memory' or source_status == 'completed',
+                                  'final_response': '构造验收回答'}}
+                 for key, sid in zip(('memory', 'incident', 'audit'), sessions)}
+        return verify_live(directory / 'state.db', tasks, directory, before)
+
+    def test_failed_memory_is_successfully_traced_without_claiming_it_was_saved(self):
+        from tools.memory_tool import MemoryStore, memory_tool
+        store = MemoryStore(); store.load_from_disk()
+        actual = json.loads(memory_tool(action='replace', old_text='missing-self-check-source',
+                                        content='不会写入', store=store))
+        self.assertFalse(actual['success'])
+        result = self.history_fixture(actual, source_status='failed')
+        self.assertTrue(result['passed'], result['checks'])
+        self.assertFalse(result['source_memory']['write_completed'])
+        self.assertFalse(result['source_memory']['file_nonempty'])
+        self.assertEqual(result['source_memory']['operations'][0]['execution_state'], 'failed')
+        self.assertEqual(result['source_memory']['task_status'], 'failed')
+
+    def test_staged_or_unknown_memory_never_becomes_completed(self):
+        for payload, expected in (({'success': True, 'staged': True}, 'accepted'),
+                                  ({'success': True}, 'unknown'),
+                                  ({'success': True, 'done': True}, 'completed')):
+            with self.subTest(expected=expected):
+                result = self.history_fixture(payload)
+                self.assertTrue(result['passed'], result['checks'])
+                self.assertEqual(result['source_memory']['operations'][0]['execution_state'], expected)
+                self.assertEqual(result['source_memory']['write_completed'], expected == 'completed')
+
+    def test_discovery_without_original_receipts_does_not_pass_trace_checks(self):
+        result = self.history_fixture({'success': False, 'error': '构造拒绝'}, hide_receipts=True)
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['checks']['核查实际读到Memory请求和原回执'])
+        self.assertFalse(result['checks']['核查实际读到回滚及暂停的原请求回执'])
+
+    def test_recalled_receipt_cannot_turn_a_failed_source_into_success(self):
+        result = self.history_fixture({'success': False, 'error': '构造原始写入失败'}, tamper_memory_receipt=True)
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['checks']['核查实际读到Memory请求和原回执'])
+        self.assertFalse(result['source_memory']['write_completed'])
+        self.assertEqual(result['source_memory']['operations'][0]['execution_state'], 'failed')
+
+    def test_a_completed_rollback_cannot_be_scored_as_denied(self):
+        result = self.history_fixture({'success': False}, rollback_state='completed')
+        self.assertFalse(result['passed'])
+        self.assertFalse(result['checks']['回滚被拒绝而不是已经完成'])
+
+    def test_wait_allows_a_failed_source_only_after_it_is_drained(self):
+        import lab
+        failed = {'status': 'failed', 'drained': False, 'error': '构造源任务失败'}
+        drained = {**failed, 'drained': True}
+        with patch.object(lab, 'api', side_effect=[failed, [], drained, []]), patch.object(lab.time, 'sleep'):
+            task, reviews = lab.wait('source', allow_failed_source=True)
+        self.assertEqual(task['status'], 'failed')
+        self.assertTrue(task['drained'])
+        with patch.object(lab, 'api', side_effect=[drained, []]), self.assertRaises(RuntimeError):
+            lab.wait('ordinary-task')
+
     def test_no_live_permission_or_old_replay_never_load_credentials(self):
         from demo import LiveRun, ReplayUnavailable
         with patch.dict(sys.modules, {'credentials': SimpleNamespace(load_credentials=Mock(side_effect=AssertionError('不得读凭据'))) }):

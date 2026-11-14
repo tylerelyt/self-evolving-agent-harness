@@ -31,7 +31,7 @@ def run(mode):
     out = directory / "validation/runs" / run_id
     out.mkdir(parents=True)
     files = [source, Path(__file__).resolve(), root / "examples/notebook07_setup.py", root / "examples/notebook07_story.py",
-             root / "examples/notebook_support.py", *sorted((directory / "materials").glob("*")),
+             root / "examples/notebook_support.py", directory / "initialization.py", *sorted((directory / "materials").glob("*")),
              *sorted(p for p in (directory / "skill_creator").rglob("*") if p.is_file() and "__pycache__" not in p.parts)]
     hashes = {str(p.relative_to(root)): digest(p) for p in files}
     record = {"mode": mode, "run_id": run_id, "status": "running", "hashes": hashes, "cells": []}
@@ -145,11 +145,13 @@ get_ipython().kernel.getpass = _key_input
                     if p.is_file() and "__pycache__" not in p.parts}
         review = json.loads((runtime / "review-diff.json").read_text())
         fresh = json.loads((runtime / "fresh-thread.json").read_text())
+        from initialization import resources_match
+        selection = json.loads((runtime / "initialization-selection.json").read_text())["resources"]
         checks = {
             "执行期间版本未变": all(digest(root / name) == value for name, value in hashes.items()),
             "本轮生成原稿及资源完整保留": bool(review["generated"]) and snapshot(runtime / "generated-skill") == review["generated"],
             "新调查使用审阅后同一份Skill": snapshot(skill) == snapshot(runtime / "reviewed-skill") == review["reviewed"] == fresh["skill_before"] == fresh["skill_after"],
-            "resources实际创建所选目录": set(("scripts", "references", "assets")).issubset(json.loads((runtime / "initialized-directories.json").read_text())),
+            "resources与本次显式选择一致": resources_match(selection, json.loads((runtime / "initialized-directories.json").read_text())),
             "初稿与修改后结构均合格": all(json.loads((runtime / name).read_text())["exit_code"] == 0
                 for name in ("model-draft-validation.json", "reviewed-validation.json")),
             "没有修改旧调查记录": digest(runtime / "work/history/old-thread.md") == digest(directory / "materials/old-thread.md"),

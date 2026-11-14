@@ -1,14 +1,157 @@
-"""采用范围与归档前读取的离线反例，不调用 Hermes 或模型。"""
+"""诊断能力、采用范围与归档读取反例；原生工具检查不调用模型。"""
 import hashlib
+from copy import deepcopy
+import json
+import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
 from common import HERE
 from adoption import adopt_package, package_manifest
 from curator_read_adapter import CuratorReadAdapter
-from curation_workshop import review_outcome, extract_answer
+from curation_workshop import review_outcome, extract_answer, assess_probe, CurationLab
+from diagnostics import RULES, PLANS, query
+
+
+def probe_fixture(kind='capacity', *, resource='renamed/diagnostic-rules.md', inlined=False):
+    messages = []
+    def tool(name, args, receipt):
+        identifier = 'fixture-' + str(len(messages))
+        messages.append({'role': 'assistant', 'tool_calls': [{'id': identifier,
+            'function': {'name': name, 'arguments': json.dumps(args)}}]})
+        messages.append({'role': 'tool', 'tool_call_id': identifier, 'content': json.dumps(receipt)})
+    args = {'name': 'connection-diagnostics'}
+    if not inlined:
+        args['file_path'] = resource
+    tool('skill_view', args, {'success': True, 'content': '# Relevant diagnostic rule\n```json\n' + json.dumps(RULES[kind]) + '\n```'})
+    sections = ['metrics', 'holders'] + (['release_paths'] if kind == 'leak' else [])
+    evidence = []
+    for section in sections:
+        receipt = query(kind, section)
+        tool('diagnostic_query', {'section': section}, receipt)
+        evidence += [row['id'] for row in receipt['records']]
+    answer = {'diagnosis': RULES[kind]['diagnosis'],
+        'judgments': {'demand_exceeds_limit': kind == 'capacity', 'connections_return_after_peak': kind == 'capacity',
+                      'release_failure_confirmed': False}, 'evidence_ids': evidence, 'next_check': deepcopy(PLANS[kind])}
+    return {'completed': True, 'messages': messages, 'final_response': json.dumps(answer)}
+
+
+class DiagnosticRetentionTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('HERMES_NATIVE_TESTS') == '1',
+                         'Optional native check: set HERMES_NATIVE_TESTS=1 and HERMES_PYTHON to the pinned runtime')
+    def test_native_registry_exposes_scoped_query_and_reads_actual_skill_resources_without_model(self):
+        script = r'''
+import json,shutil
+from curation_workshop import CurationLab,assess_probe
+from diagnostics import register_query,query,probe_tools
+from test_risks import probe_fixture
+lab=CurationLab()
+try:
+ lab.seed()
+ from tools.registry import registry
+ register_query('leak')
+ names={tool['function']['name'] for tool in probe_tools()}
+ assert {'skills_list','skill_view','diagnostic_query'} == names,names
+ result=probe_fixture('leak')
+ for index,message in enumerate(result['messages']):
+  if message['role']!='assistant':continue
+  call=message['tool_calls'][0]['function'];args=json.loads(call['arguments'])
+  if call['name']=='skill_view':args={'name':'connection-leak-investigation','file_path':'references/release-path.md'}
+  call['arguments']=json.dumps(args)
+  receipt=registry.dispatch(call['name'],args)
+  result['messages'][index+1]['content']=receipt if isinstance(receipt,str) else json.dumps(receipt)
+ assert assess_probe(result,'leak')['task_pass'],assess_probe(result,'leak')
+ print('PASS native tool definitions/dispatch and actual resource read; model result is an explicit fixture')
+finally:shutil.rmtree(lab.root)
+'''
+        python = os.environ.get('HERMES_PYTHON') or sys.executable
+        result = subprocess.run([python, '-B', '-c', script], cwd=HERE,
+                                text=True, capture_output=True, timeout=35)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def change_answer(self, result, field, value):
+        answer = json.loads(result['final_response']); answer[field] = value
+        result['final_response'] = json.dumps(answer)
+        return result
+
+    def test_capacity_and_special_leak_branch_require_actual_evidence_and_plan(self):
+        for kind in ('capacity', 'leak'):
+            with self.subTest(kind=kind):
+                self.assertTrue(assess_probe(probe_fixture(kind), kind)['task_pass'])
+
+    def test_resource_can_be_renamed_or_inlined_in_common_entry(self):
+        self.assertTrue(assess_probe(probe_fixture('leak', resource='references/merged.md'), 'leak')['task_pass'])
+        self.assertTrue(assess_probe(probe_fixture('leak', inlined=True), 'leak')['task_pass'])
+        result = probe_fixture('leak')
+        rule = deepcopy(RULES['leak']); rule['next_check']['checks'].reverse()
+        result['messages'][1]['content'] = json.dumps({'success': True, 'content': '```json\n' + json.dumps(rule) + '\n```'})
+        self.assertTrue(assess_probe(result, 'leak')['task_pass'])
+
+    def test_duplicate_or_orphan_receipts_cannot_pass(self):
+        result = probe_fixture(); result['messages'].append(deepcopy(result['messages'][1]))
+        self.assertFalse(assess_probe(result, 'capacity')['task_pass'])
+        result = probe_fixture(); result['messages'][1]['tool_call_id'] = None
+        self.assertFalse(assess_probe(result, 'capacity')['task_pass'])
+
+    def test_correct_label_and_arbitrary_read_do_not_prove_retained_capability(self):
+        result = probe_fixture('leak')
+        result['messages'][1]['content'] = json.dumps({'success': True, 'content': 'unrelated handbook'})
+        assessment = assess_probe(result, 'leak')
+        self.assertFalse(assessment['checks']['related_rule_read'])
+        self.assertFalse(assessment['task_pass'])
+        legacy = self.change_answer(probe_fixture(), 'next_check', '再检查一下')
+        self.assertFalse(assess_probe(legacy, 'capacity')['task_pass'])
+
+    def test_capacity_rule_or_capability_label_alone_cannot_replace_leak_detail(self):
+        result = probe_fixture('leak')
+        for rule in (RULES['capacity'], {'schema': 'connection-diagnostic-rule-v1', 'capability': 'leak'}):
+            result['messages'][1]['content'] = json.dumps({'success': True, 'content': '```json\n' + json.dumps(rule) + '\n```'})
+            self.assertFalse(assess_probe(result, 'leak')['task_pass'])
+
+    def test_query_receipts_scope_and_unqueried_citations_are_checked(self):
+        result = probe_fixture('leak')
+        receipt = json.loads(result['messages'][3]['content']); receipt['scope']['cluster'] = 'other'
+        result['messages'][3]['content'] = json.dumps(receipt)
+        self.assertFalse(assess_probe(result, 'leak')['checks']['current_queries_match'])
+        result = probe_fixture('leak')
+        result['messages'] = result['messages'][:-2]
+        self.assertFalse(assess_probe(result, 'leak')['task_pass'])
+
+    def test_unknown_release_code_cannot_be_reported_as_confirmed_failure(self):
+        result = probe_fixture('leak')
+        answer = json.loads(result['final_response']); answer['judgments']['release_failure_confirmed'] = True
+        result['final_response'] = json.dumps(answer)
+        self.assertFalse(assess_probe(result, 'leak')['checks']['necessary_judgments'])
+
+    def test_next_step_must_cover_exception_early_return_and_failure_verification(self):
+        for field, omitted in [('checks', 'exception'), ('checks', 'early_return'),
+                               ('verification', 'failed_request_returns_connection')]:
+            result = probe_fixture('leak'); answer = json.loads(result['final_response'])
+            answer['next_check'][field].remove(omitted); result['final_response'] = json.dumps(answer)
+            self.assertFalse(assess_probe(result, 'leak')['checks']['verifiable_next_check'])
+
+    def test_support_contracts_exist_in_both_initial_packages(self):
+        for kind, path in [('capacity', 'connection-pool-triage/references/pool-metrics.md'),
+                           ('leak', 'connection-leak-investigation/references/release-path.md')]:
+            result = probe_fixture(kind)
+            result['messages'][1]['content'] = json.dumps({'success': True,
+                'content': (HERE / 'materials' / path).read_text()})
+            self.assertTrue(assess_probe(result, kind)['task_pass'])
+
+    def test_same_task_before_and_after_is_required_including_no_op(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lab = object.__new__(CurationLab); lab.root = Path(directory); lab.checks = {}; lab.probes = {}
+            assessment = assess_probe(probe_fixture(), 'capacity')
+            for phase in ('before', 'after'):
+                lab.probes[phase, 'capacity'] = {'protocol': {'model': 'fixture'}, 'input': 'same task',
+                    'assessment': deepcopy(assessment), 'session_id': phase, 'passed': True}
+            self.assertTrue(lab.compare_probe('capacity')['retained'])
+            lab.probes['after', 'capacity']['assessment']['snapshot_sha256'] = 'changed'
+            self.assertFalse(lab.compare_probe('capacity')['comparable'])
 
 
 class RiskTests(unittest.TestCase):

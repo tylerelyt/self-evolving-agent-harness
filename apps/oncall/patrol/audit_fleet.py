@@ -616,6 +616,30 @@ def audit_core(root, report):
         }
         if "patrol_workers" in report or any("patrol_loop" in phase for phase in report["rounds"]):
             checks["continuous_patrol"] = audit_patrol_loop(root, report)
+        if "implementation" in report:
+            checks["implementation"] = audit_implementation(root, report)
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
     return checks
+
+
+def audit_implementation(root, report):
+    """Reconstruct the chosen source and hook evidence without importing its code."""
+    from implementation import implementation_evidence, verify_stage_check
+
+    declared = report["implementation"]
+    snapshot = run_file(root, declared["snapshot"])
+    binding = read_json(root, snapshot.parent.relative_to(root) / "binding.json")
+    if "stage_check" in declared:
+        check = run_file(root, snapshot.parent.relative_to(root) / "stage-check.json")
+        binding["stage_check"] = verify_stage_check(check, binding["sha256"], live=report["mode"] == "live")
+    reconstructed = implementation_evidence(snapshot, binding)
+    require(reconstructed == declared, "Selected implementation differs from its saved source or hook receipts")
+    verified = (report["status"] == "complete" and reconstructed["all_hooks_executed"]
+                and any(phase.get("decision") == "publish" for phase in report["rounds"])
+                and any(phase.get("adoption_verified") is True for phase in report["rounds"]))
+    require(report.get("closed_loop_verified") is verified,
+            "Closed-loop claim differs from the selected implementation and publication/adoption evidence")
+    return {"status": "passed", "sha256": reconstructed["sha256"],
+            "executed_hooks": reconstructed["executed_hooks"], "closed_loop_verified": verified,
+            "stage_check_verified": "stage_check" in reconstructed}

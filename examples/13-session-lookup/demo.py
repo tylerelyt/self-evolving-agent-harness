@@ -26,6 +26,7 @@ AUDIT_REQUEST = ('核对本次教学环境的两项旧事：lesson13-memory 约�
                  '先用 session_search 的关键词发现记录，结合时间、标题与业务对象选择会话；'
                  '再用 around_message_id 和 window 小窗口展开，必要时继续向前或向后读。'
                  '按 tool_call_id 对照请求和真实回执，说明受理、完成及业务复查分别证实了什么。'
+                 'Memory 保存也可能失败、被拒绝或只被受理：以原回执如实说明，不预设写入完成。'
                  '附会话与消息编号；没有记录的外部操作保持未知，不因未命中就说没有发生。'
                  '只在回复中修订草稿，不执行旧操作，不写记忆。')
 
@@ -108,6 +109,7 @@ class LiveRun:
         record(HERE / 'validation/live-latest.json', result)
         lines = ['# 第13讲本次运行', '', '本次使用真实模型与原生工具；业务为构造现场。',
                  '程序检查：' + ('通过' if result['passed'] else '未通过'),
+                 '源 Memory 操作完成：' + str(result['source_memory']['write_completed']) + '；来源状态见 history-check.json。',
                  '模型报告仍需人工核对未知范围与因果表述，程序通过不代替这项审阅。', '', '|检查|结果|', '|---|---|']
         lines += ['|' + label + '|' + ('通过' if ok else '未通过') + '|' for label, ok in result['checks'].items()]
         lines += ['', '[原始窗口与配对](history-check.json) · [任务](tasks/) · [源码版本](source-hashes.json) · [退出检查](shutdown.json)']
@@ -120,9 +122,9 @@ class LiveRun:
         return result
 
 
-def send_task(sid, title, message, **permissions):
+def send_task(sid, title, message, *, allow_failed_source=False, **permissions):
     api('/sessions', {'id': sid, 'title': title, **permissions})
-    return lab.wait(lab.send(sid, message))[0]
+    return lab.wait(lab.send(sid, message), allow_failed_source=allow_failed_source)[0]
 
 
 def main():
@@ -139,7 +141,7 @@ def main():
         run = LiveRun(args.keep_running)
         run.prepare()
         tasks = {}
-        tasks['memory'] = send_task('memory-' + run.suffix, '前台记忆工具留痕', MEMORY_REQUEST, memory_demo=True)
+        tasks['memory'] = send_task('memory-' + run.suffix, '前台记忆工具留痕', MEMORY_REQUEST, memory_demo=True, allow_failed_source=True)
         tasks['incident'] = send_task('incident-' + run.suffix, '支付事故调查 rollback', INCIDENT_REQUEST)
         from hermes_state import SessionDB
         from validation_checks import digest

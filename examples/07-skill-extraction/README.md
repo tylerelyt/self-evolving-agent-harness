@@ -16,7 +16,7 @@
 
 第三幕先核对文件哈希，确认使用的仍是刚审阅的那份 Skill；再以 `codex.thread_start(cwd=...)` 新建 Thread，通过 `fresh.turn([SkillInput(...), TextInput(...)])` 显式调用 `$legacy-payment-oncall`。执行 `run()` 后展示本轮模型报告及实际查询回执。未查询的入口不会补成成功，也不会用预置根因替换模型报告。
 
-初始目录为 `legacy-payment/.agents/skills/legacy-payment-oncall/`。第一版不传 `--resources`，初始化后直接打印目录。离线检查另对比不传该选项与传入三类资源的差别，并确认未完成的初始化骨架不能通过结构校验。随附的 [Skill Creator](skill_creator/来源说明.md) 和脚本用于初始化与结构校验，查询入口使用本地案例材料。
+初始目录为 `legacy-payment/.agents/skills/legacy-payment-oncall/`。默认 `selected_resources = []`，第一版不传 `--resources`，初始化后直接打印目录；若明确需要额外资源，可在该列表选择 `scripts`、`references` 或 `assets`。验收以本次选择与初始化实际目录为准，不强制创建三类资源。离线检查另对比不传该选项与传入三类资源的差别，并确认未完成的初始化骨架不能通过结构校验。随附的 [Skill Creator](skill_creator/来源说明.md) 和脚本用于初始化与结构校验，查询入口使用本地案例材料。
 
 练习从历史调查中提炼方法，经过人工审阅，再在根因不同的新事故中试用。开头的系统设计题帮助区分可复用的方法与单次调查结论；运行记录展示 Skill 形成、修改和使用时分别发生了什么。
 

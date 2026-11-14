@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import time
+from uuid import uuid4
 
 
 def main():
@@ -31,6 +32,8 @@ def main():
         raise RuntimeError("可用空间不足1GiB，停止生成验证记录")
     out = lesson/"validation/runs"/args.run_id
     out.mkdir(parents=True, exist_ok=False)
+    native_run = lesson/"runtime"/("native-notebook-" + uuid4().hex)
+    os.environ["LESSON15_RUN_DIR"] = str(native_run)
     os.environ.update(
         PYTHONDONTWRITEBYTECODE="1",
         JUPYTER_RUNTIME_DIR=str(out/"jupyter"),
@@ -66,9 +69,10 @@ def main():
                        kernel_manager_class=RunKernelManager,
                        resources={"metadata": {"path": str(lesson)}}).execute()
         if args.mode == "live":
-            result = json.loads((lesson/"validation/native-live-latest.json").read_text())
-            if result.get("validation_run_id") != args.run_id:
-                raise RuntimeError("没有对应本次运行编号的模型结果，不能使用旧 latest")
+            result = json.loads((lesson/"validation"/("notebook-" + args.run_id + ".json")).read_text())
+            if (result.get("validation_run_id") != args.run_id or result.get("attempt_id") != native_run.name
+                    or Path(result.get("run", "")).resolve() != native_run.resolve()):
+                raise RuntimeError("没有对应本次运行编号的原生观察记录")
             if result.get("status") not in ("passed", "no-update"):
                 raise RuntimeError("本次模型观察未完成")
         status = "passed"
