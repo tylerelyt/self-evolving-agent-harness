@@ -50,7 +50,7 @@ cp -n workshop/capstone/.env.example .env
 
 在仓库根目录 `.env` 中填写 `GLM_API_KEY`，按需设置 `GLM_MODEL` 和 `GLM_BASE_URL`，然后去掉启动命令中的 `--offline`。已有 `.env` 时只补齐字段，不要覆盖或提交本地配置。也可用 `--env-file /path/to/local.env` 指定其他配置文件；当前进程环境变量优先。
 
-真实模型模式支持跨业务页的持续问答和并行只读调查。「新建对话」创建独立会话。脚本模式会明确标识接线演示，不提供自由模型推理。完整受控双轮已用脚本模型验收，真实模型目前完成部分联调。
+真实模型模式支持跨业务页的持续问答和并行只读调查。「新建对话」创建独立会话。脚本模式明确标识集成演示，不提供自由模型推理。脚本运行验证流程和证据链；真实模型的调查与学习效果需使用固定配置、独立评测和原始回执验证。
 
 ### 逐步实现
 
@@ -104,7 +104,7 @@ bash scripts/setup_skillclaw.sh
 
 演练收齐原生调查归档并确认恢复后，启动 Evolve Server。课程工程分析模板先核对真实补查分支，将有来源的改进方向加入实际候选修订请求；原生会话队列仍然只有两份初判。模板和脚本模型的作用均单独标明，不能将预设改进策略说成模型自主发现。候选进入隔离的验证队列。业务回放使用独立的固定快照，分别核对持续失败、间歇失败和首次探测未复现。新版本只有在通过全部用例、且至少修复一个旧版失败时，才按验收哈希发布到正式 SkillHub。A、B 各自拉取，然后交换故障类型，在新的调查会话中再次读取 Skill。第二轮须核对两端的探测顺序和结论。任一端未证明新版行为，就恢复上一个批准版本。两份验证通过的经历继续进入演化。第二轮产出的合格候选留待下一次现场任务验证。
 
-默认使用本机脚本模型，无需 API key。Hermes 工具调用、HTTP 流量、SkillClaw 原生归档、演化与 SkillHub 同步实际运行。可选的 `--live` 使用已配置的 `GLM_API_KEY`、`GLM_MODEL` 与 `GLM_BASE_URL`，会产生模型请求。受控两轮的完整验收使用脚本模型；真实模型目前完成工作台前台、问答与 Memory 的部分联调，完整两轮尚未验收。
+默认使用本机脚本模型，无需 API key。Hermes 工具调用、HTTP 流量、SkillClaw 原生归档、演化与 SkillHub 同步实际运行。可选的 `--live` 使用已配置的 `GLM_API_KEY`、`GLM_MODEL` 与 `GLM_BASE_URL`，会产生模型请求。脚本模式的两轮验收不代表真实模型质量；在线运行需分别核对逐题结果、发布决定与下一轮采用证据。
 
 验收时挑一条第二轮调查，从 `patrol-evidence.json` 核对初判读到的 Skill 哈希与两个 HTTP 探测回执，再回查第一轮的采用决定和逐题证据。沿同一事故的 `investigation.json` 检查父 Session、原报告 Item 和分支里的三次探测，然后核对审批引用、处置回执及两个恢复窗口。想亲手巡检、控制故障开关并开展分支调查，可先做[单实例巡检](patrol/LAB.md)与[故障注入和调查](patrol/ONCALL.md)。
 
@@ -375,4 +375,4 @@ SKILL_SHA='填入 skill_sha256'
   --run "$RUN" --out "$RUN/http-workset-copy.json"
 ```
 
-HTTP 样本标为 `working_only`。跨服务根因评测可用上面的企业题入口，Langfuse 原生采集和 OpenViking 在[总装方案](INTEGRATION-PLAN.md)中另列接线。也可以做[值班学习与回退实作](LEARNING-LAB.md)，在固定事故快照上单独观察版本决定。 [支付查询短练习](../practice/README.md)
+HTTP 样本标为 `working_only`。跨服务根因评测可用上面的企业题入口，Langfuse 原生采集和 OpenViking 的组件关系见[集成设计](INTEGRATION-PLAN.md)。也可以做[值班学习与回退实作](LEARNING-LAB.md)，在固定事故快照上单独观察版本决定。 [支付查询短练习](../practice/README.md)
